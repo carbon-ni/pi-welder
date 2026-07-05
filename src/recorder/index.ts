@@ -9,7 +9,10 @@
 
 export { buildEvent, buildToolResultEvent } from "./events.ts";
 export type { WelderEvent } from "./events.ts";
-export { appendEvent, pruneOldSessions, readEvents, sessionLogPath } from "./log.ts";
+export { appendEvent, loadAllEvents, listSessionLogs, pruneOldSessions, readEvents, sessionLogPath, writeFailureReport, FAILURE_REPORT_FILENAME } from "./log.ts";
 export { createStats, recordRepairs, recordToolFailure, statsSummary } from "./stats.ts";
 export type { Stats } from "./stats.ts";
+export { aggregateFailures } from "./aggregate.ts";
+export type { FailureCluster, FailureSample, AggregateOptions } from "./aggregate.ts";
+export { formatFailureReport } from "./report.ts";
 export type { Repair } from "../repairs/index.ts";

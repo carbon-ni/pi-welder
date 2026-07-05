@@ -12,9 +12,11 @@ import {
   buildToolResultEvent,
   appendEvent,
   readEvents,
+  loadAllEvents,
   sessionLogPath,
   pruneOldSessions,
   statsSummary,
+  writeFailureReport,
   type Repair,
 } from "./recorder/index.ts";
 
@@ -135,6 +137,52 @@ test("readEvents skips blank/malformed lines", async () => {
     const events = await readEvents(file);
     assert.equal(events.length, 1);
     assert.equal(events[0]!.toolName, "x");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ─── loadAllEvents ─────────────────────────────────────────────────────
+
+test("loadAllEvents reads every .jsonl file in the log dir", async () => {
+  const dir = await tmp();
+  try {
+    await appendEvent(dir, "sess-a", buildEvent({ eventType: "tool_call", toolName: "a", provider: "p", model: "m", repairs: [], inputKeys: [] }));
+    await appendEvent(dir, "sess-b", buildEvent({ eventType: "tool_call", toolName: "b", provider: "p", model: "m", repairs: [], inputKeys: [] }));
+    await fs.writeFile(path.join(dir, "notes.txt"), "ignored");
+    const events = await loadAllEvents(dir);
+    assert.equal(events.length, 2);
+    const names = events.map((e) => e.toolName).sort();
+    assert.deepEqual(names, ["a", "b"]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadAllEvents on a missing dir returns []", async () => {
+  const events = await loadAllEvents(path.join(os.tmpdir(), "welder-nope-" + Date.now()));
+  assert.deepEqual(events, []);
+});
+
+test("writeFailureReport writes markdown to log dir and returns path", async () => {
+  const dir = await tmp();
+  try {
+    const reportPath = await writeFailureReport(dir, "# report\nbody");
+    assert.equal(reportPath, path.join(dir, "failures-report.md"));
+    const content = await fs.readFile(reportPath, "utf8");
+    assert.match(content, /^# report/);
+    assert.match(content, /body/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeFailureReport creates the dir if missing", async () => {
+  const dir = path.join(await tmp(), "nested");
+  try {
+    const reportPath = await writeFailureReport(dir, "x");
+    const content = await fs.readFile(reportPath, "utf8");
+    assert.equal(content, "x");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

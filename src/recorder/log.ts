@@ -58,3 +58,31 @@ export async function pruneOldSessions(logDir: string, keep: number): Promise<nu
   await Promise.all(toRemove.map((f) => fs.unlink(path.join(logDir, f.name)).catch(() => {})));
   return toRemove.length;
 }
+
+/** List `.jsonl` session log files in a directory (sorted by name). Missing dir → []. */
+export async function listSessionLogs(logDir: string): Promise<string[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(logDir);
+  } catch {
+    return [];
+  }
+  return entries.filter((f) => f.endsWith(".jsonl")).sort();
+}
+
+/** Read every `.jsonl` session log in `logDir` and concatenate events. */
+export async function loadAllEvents(logDir: string): Promise<WelderEvent[]> {
+  const files = await listSessionLogs(logDir);
+  const batches = await Promise.all(files.map((f) => readEvents(path.join(logDir, f))));
+  return batches.flat();
+}
+
+export const FAILURE_REPORT_FILENAME = "failures-report.md";
+
+/** Write a failure report markdown file into `logDir`. Returns its path. */
+export async function writeFailureReport(logDir: string, content: string): Promise<string> {
+  await fs.mkdir(logDir, { recursive: true });
+  const reportPath = path.join(logDir, FAILURE_REPORT_FILENAME);
+  await fs.writeFile(reportPath, content, "utf8");
+  return reportPath;
+}

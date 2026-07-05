@@ -6,7 +6,14 @@ import {
   recoveryFailuresSummary,
   setRecoveryLimit,
 } from "./recovery.ts";
-import { sessionLogPath, statsSummary } from "./recorder/index.ts";
+import {
+  aggregateFailures,
+  formatFailureReport,
+  loadAllEvents,
+  sessionLogPath,
+  statsSummary,
+  writeFailureReport,
+} from "./recorder/index.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 
 export interface WelderCommandSpec {
@@ -30,6 +37,51 @@ export function statusSummary(ctx: ExtensionContext, runtime: WelderRuntime): st
     `tool calls seen  : ${runtime.stats.totalToolCalls}`,
     `failed results   : ${runtime.stats.failedToolResults}`,
     `log file         : ${sessionLogPath(logDir(ctx), sessionId(ctx))}`,
+  ].join("\n");
+}
+
+export interface MineResult {
+  reportPath: string;
+  clusters: number;
+  totalFailures: number;
+  topCluster: string | null;
+}
+
+/**
+ * Cross-session failure analysis: load all events, aggregate failures,
+ * write a markdown report to the log dir. Pure over injected loaders.
+ */
+export async function mineFailures(
+  logDirectory: string,
+  deps: {
+    load: (dir: string) => Promise<import("./recorder/index.ts").WelderEvent[]>;
+    write: (dir: string, content: string) => Promise<string>;
+  },
+): Promise<MineResult> {
+  const events = await deps.load(logDirectory);
+  const clusters = aggregateFailures(events);
+  const report = formatFailureReport(clusters);
+  const reportPath = await deps.write(logDirectory, report);
+  const totalFailures = clusters.reduce((sum, c) => sum + c.count, 0);
+  const top = clusters[0];
+  return {
+    reportPath,
+    clusters: clusters.length,
+    totalFailures,
+    topCluster: top ? `${top.toolName} / ${top.errorKind} (×${top.count})` : null,
+  };
+}
+
+export function mineSummary(result: MineResult): string {
+  if (result.clusters === 0) {
+    return `pi-welder: no failures found. Report at ${result.reportPath}`;
+  }
+  return [
+    "pi-welder failure report",
+    `report   : ${result.reportPath}`,
+    `clusters : ${result.clusters}`,
+    `failures : ${result.totalFailures}`,
+    `top      : ${result.topCluster}`,
   ].join("\n");
 }
 
@@ -127,6 +179,21 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
       handler: async (_args, ctx) => {
         clearRecovery(runtime.recovery);
         ctx.ui.notify("pi-welder: cleared pending recovery guidance", "info");
+      },
+    },
+    {
+      name: "welder-mine",
+      description: "Aggregate tool failures across sessions into a report",
+      handler: async (_args, ctx) => {
+        try {
+          const result = await mineFailures(logDir(ctx), {
+            load: loadAllEvents,
+            write: writeFailureReport,
+          });
+          ctx.ui.notify(mineSummary(result), "info");
+        } catch (err) {
+          ctx.ui.notify(`pi-welder: failed to mine failures: ${String(err)}`, "error");
+        }
       },
     },
   ];
