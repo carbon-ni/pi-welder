@@ -1,5 +1,5 @@
 import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { repairArgs, type Repair } from "./repairs.ts";
+import { repairArgs, type Repair } from "./repairs/index.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,

@@ -9,9 +9,9 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { Repair } from "./repairs.ts";
+import type { Repair } from "./repairs/index.ts";
 
-export type { Repair } from "./repairs.ts";
+export type { Repair } from "./repairs/index.ts";
 
 export interface WelderEvent {
   ts: string;

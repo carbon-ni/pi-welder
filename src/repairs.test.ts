@@ -14,7 +14,7 @@ import {
   repairRules,
   type RepairAction,
   type RepairRule,
-} from "./repairs.ts";
+} from "./repairs/index.ts";
 
 const noRepairs = (input: Record<string, unknown>) => repairArgs(input).repairs;
 
