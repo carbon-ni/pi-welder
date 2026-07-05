@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { logDir, sessionId } from "./handlers.ts";
+import { logDir, sessionId } from "./pi-context.ts";
 import {
   buildRecoveryGuidance,
   clearRecovery,

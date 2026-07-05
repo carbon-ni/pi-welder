@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { repairArgs } from "./repairs.ts";
 import {
@@ -14,16 +13,10 @@ import {
   recordRepairs,
   recordToolFailure,
 } from "./recorder.ts";
+import { logDir, modelMeta, sessionId } from "./pi-context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
-
-export const logDir = (ctx: ExtensionContext) => path.join(ctx.cwd ?? process.cwd(), ".pi", "welder-log");
-export const sessionId = (ctx: ExtensionContext): string => ctx.sessionManager?.getSessionId?.() ?? "unknown";
-export const modelMeta = (ctx: ExtensionContext) => ({
-  provider: ctx.model?.provider ?? "unknown",
-  model: ctx.model?.id ?? "unknown",
-});
 
 export async function handleSessionStart(
   runtime: WelderRuntime,
