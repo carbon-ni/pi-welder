@@ -1,4 +1,4 @@
-import { createStats, type Stats } from "./recorder.ts";
+import { createStats, type Stats } from "./recorder/index.ts";
 import { createRecoveryState, type RecoveryState } from "./recovery.ts";
 
 export interface WelderRuntime {

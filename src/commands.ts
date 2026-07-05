@@ -6,7 +6,7 @@ import {
   recoveryFailuresSummary,
   setRecoveryLimit,
 } from "./recovery.ts";
-import { sessionLogPath, statsSummary } from "./recorder.ts";
+import { sessionLogPath, statsSummary } from "./recorder/index.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 
 export interface WelderCommandSpec {

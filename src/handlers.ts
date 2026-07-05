@@ -12,7 +12,7 @@ import {
   pruneOldSessions,
   recordRepairs,
   recordToolFailure,
-} from "./recorder.ts";
+} from "./recorder/index.ts";
 import { logDir, modelMeta, sessionId } from "./pi-context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 

@@ -16,7 +16,7 @@ import {
   pruneOldSessions,
   statsSummary,
   type Repair,
-} from "./recorder.ts";
+} from "./recorder/index.ts";
 
 const tmp = () => fs.mkdtemp(path.join(os.tmpdir(), "welder-"));
 
