@@ -174,6 +174,11 @@ export interface RepairOptions {
   extraRules?: readonly RepairRule[];
 }
 
+interface ResolvedRepairOptions {
+  toolName?: string;
+  rules: readonly RepairRule[];
+}
+
 export interface RepairRule {
   /** Stable registry name; array-shape may emit split/wrap repair actions. */
   action: RepairAction | "array-shape";
@@ -257,12 +262,11 @@ export const repairRules: RepairRule[] = [
  * Apply ordered structural repairs to a single field value.
  * Registry order is the extension point: parse-json → array-shape matters.
  */
-function repairValue(value: unknown, key: string, fieldPath: string, options: RepairOptions): [unknown, Repair[]] {
+function repairValue(value: unknown, key: string, fieldPath: string, options: ResolvedRepairOptions): [unknown, Repair[]] {
   const repairs: Repair[] = [];
   const ctx: RepairContext = { key, fieldPath, parsedFromString: false, toolName: options.toolName };
 
-  const rules = options.rules ?? [...repairRules, ...(options.extraRules ?? [])];
-  for (const rule of rules) {
+  for (const rule of options.rules) {
     const result = rule.repair(value, ctx);
     value = result.value;
     repairs.push(...result.repairs);
@@ -337,7 +341,8 @@ export function applyRelationalDefaults(input: Record<string, unknown>): RepairR
 
 /** Repair every field of a tool-call args object. Pure. */
 export function repairArgs(input: Record<string, unknown>, options: RepairOptions = {}): RepairResult {
-  const [result, repairs] = repairObjectFields(input, "input", options);
+  const resolvedOptions = resolveRepairOptions(options);
+  const [result, repairs] = repairObjectFields(input, "input", resolvedOptions);
 
   const defaults = applyRelationalDefaults(result);
   for (const k of Object.keys(defaults.result)) result[k] = defaults.result[k];
@@ -346,10 +351,17 @@ export function repairArgs(input: Record<string, unknown>, options: RepairOption
   return { result, repairs };
 }
 
+function resolveRepairOptions(options: RepairOptions): ResolvedRepairOptions {
+  return {
+    toolName: options.toolName,
+    rules: options.rules ?? [...repairRules, ...(options.extraRules ?? [])],
+  };
+}
+
 function repairObjectFields(
   obj: Record<string, unknown>,
   parentPath: string,
-  options: RepairOptions,
+  options: ResolvedRepairOptions,
 ): [Record<string, unknown>, Repair[]] {
   const result: Record<string, unknown> = {};
   const repairs: Repair[] = [];
@@ -387,7 +399,7 @@ function repairObjectFields(
 function repairObject(
   obj: Record<string, unknown>,
   parentPath: string,
-  options: RepairOptions,
+  options: ResolvedRepairOptions,
 ): [Record<string, unknown>, Repair[]] {
   return repairObjectFields(obj, parentPath, options);
 }
