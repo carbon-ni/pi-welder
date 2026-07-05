@@ -13,7 +13,6 @@ import * as path from "node:path";
 import type { ExtensionAPI, ToolCallEvent, ToolResultEvent, ContextEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { repairArgs } from "./repairs.ts";
 import {
-  createRecoveryState,
   clearRecovery,
   recordToolResult,
   buildRecoveryGuidance,
@@ -21,10 +20,8 @@ import {
   extractToolErrorText,
   recoveryFailuresSummary,
   setRecoveryLimit,
-  type RecoveryState,
 } from "./recovery.ts";
 import {
-  createStats,
   recordRepairs,
   recordToolFailure,
   buildEvent,
@@ -33,8 +30,8 @@ import {
   pruneOldSessions,
   statsSummary,
   sessionLogPath,
-  type Stats,
 } from "./recorder.ts";
+import { createRuntime, resetSessionState, type WelderRuntime } from "./runtime.ts";
 
 const SESSION_RETENTION = 50;
 
@@ -51,20 +48,6 @@ function parseLimitArg(args: string): number | null {
   return Number(raw);
 }
 
-interface WelderRuntime {
-  stats: Stats;
-  recovery: RecoveryState;
-  enabled: boolean;
-}
-
-function createRuntime(): WelderRuntime {
-  return {
-    stats: createStats(),
-    recovery: createRecoveryState(),
-    enabled: true,
-  };
-}
-
 function statusSummary(ctx: ExtensionContext, runtime: WelderRuntime): string {
   return [
     "pi-welder status",
@@ -77,18 +60,11 @@ function statusSummary(ctx: ExtensionContext, runtime: WelderRuntime): string {
   ].join("\n");
 }
 
-function resetSessionState(runtime: WelderRuntime): void {
-  const maxFailures = runtime.recovery.maxFailures;
-  runtime.stats = createStats();
-  runtime.recovery = createRecoveryState(maxFailures);
-}
-
 export default function (pi: ExtensionAPI) {
   const runtime = createRuntime();
 
   pi.on("session_start", async (_event, ctx) => {
-    runtime.stats = createStats();
-    runtime.recovery = createRecoveryState();
+    resetSessionState(runtime);
     runtime.stats.sessionId = sessionId(ctx);
     runtime.enabled = true;
     await pruneOldSessions(logDir(ctx), SESSION_RETENTION).catch(() => {});
