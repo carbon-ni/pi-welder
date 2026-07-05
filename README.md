@@ -1,17 +1,37 @@
 # pi-welder
 
-A pi extension that registers harness-level tool failures (schema/syntax errors,
-unknown tools, harness-side read/edit/write failures, bash spawn failures) and
-collects data for each one. CLI bash failures (non-zero exit codes) are
-intentionally excluded.
+A pi extension for **model tool-call mistake telemetry**.
+
+The goal is to understand where models make tool-call mistakes most often, so we
+can later add targeted repair rules. Logging/persistence is only the collection
+mechanism, not the product goal.
+
+Inspired by [`pi-tool-repair`](https://github.com/monotykamary/pi-tool-repair):
+observe finite recurring mistake patterns, rank hotspots, then repair them in a
+small ordered pipeline.
+
+## Current signals
+
+- `tool_call` phase: pre-execution schema/syntax mistake patterns
+  - `aliased_field`
+  - `null_optional`
+  - `empty_object_placeholder`
+  - `stringified_array`
+  - `bare_string_array`
+  - `bare_string_root`
+- `tool_result` phase: harness-side errors after execution
+  - `tool_result_error`
+  - excludes bash CLI results with a defined `exitCode`
 
 ## Layout
 
 ```
 src/
-  failure-log.ts      pure logic (classifyFailure, recordFailure, summarize)
-  failure-log.test.ts node:test suite (12 tests)
-  index.ts            pi wiring: tool_result hook + /failures command
+  tool-mistakes.ts        pure telemetry logic (mistake collection + hotspot summary)
+  tool-mistakes.test.ts   node:test suite for model mistake patterns
+  failure-log.ts          legacy harness failure view (kept for compatibility)
+  failure-log.test.ts     legacy tests
+  index.ts                pi wiring: tool_call + tool_result hooks, /mistakes + /failures
 .pi/extensions/welder.ts  thin re-export so `pi` auto-loads it in this project
 ```
 
@@ -25,15 +45,39 @@ pi -p "..."                           # auto-loads via .pi/extensions/
 
 ## What gets recorded
 
-Per failure: `{ id, timestamp, kind: "syntax"|"harness", toolName, toolCallId, cwd, input, errorContent }`
+Per mistake:
 
-- `kind: "syntax"` — validation / JSON parse / schema errors
-- `kind: "harness"` — other tool execution errors (ENOENT, unknown tool, spawn failure, ...)
-- Excluded — bash results with a defined `exitCode` (those are CLI failures)
+```ts
+{
+  id,
+  timestamp,
+  kind: "syntax" | "schema" | "harness",
+  phase: "tool_call" | "tool_result",
+  pattern,
+  toolName,
+  toolCallId,
+  cwd,
+  modelId?,
+  input?,
+  field?,
+  receivedField?,
+  errorContent?,
+}
+```
 
-Storage: `pi.appendEntry("welder-failures", log)` — in-session, survives reload,
-branches correctly. Reconstructed on `session_start` / `session_tree`.
+Storage: `pi.appendEntry("welder-tool-mistakes", telemetry)` — in-session,
+survives reload, branches correctly. Reconstructed on `session_start` /
+`session_tree`.
+
+Legacy harness failure storage remains as `welder-failures` until the telemetry
+view fully replaces it.
 
 ## View
 
-`/failures` — prints the current registry.
+- `/mistakes` — hotspot summary grouped by `model tool pattern`
+- `/failures` — legacy harness-failure summary
+
+## Next repair direction
+
+Once telemetry shows a recurring hotspot, add a targeted repair rule in the style
+of `pi-tool-repair`: validate first, repair only the failed path, then revalidate.
