@@ -225,6 +225,27 @@ test("repairArgs applies relational defaults end-to-end", () => {
   assert.equal(result.offset, 1);
 });
 
+test("custom object repair rules can extend top-level defaults", () => {
+  const { result, repairs } = repairArgs(
+    { query: "modularity" },
+    {
+      extraObjectRules: [{
+        action: "relational-default",
+        repair(input) {
+          if (!("query" in input) || "limit" in input) return { result: input, repairs: [] };
+          return {
+            result: { ...input, limit: 10 },
+            repairs: [{ field: "input.limit", action: "relational-default" }],
+          };
+        },
+      }],
+    },
+  );
+
+  assert.deepEqual(result, { query: "modularity", limit: 10, offset: 1 });
+  assert.deepEqual(repairs.map((r) => r.action), ["relational-default", "relational-default"]);
+});
+
 // ─── recursion: nested objects and arrays ───────────────────────────────
 
 test("recurses into nested objects", () => {
