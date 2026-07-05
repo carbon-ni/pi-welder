@@ -7,7 +7,9 @@ import * as path from "node:path";
 import {
   createStats,
   recordRepairs,
+  recordToolFailure,
   buildEvent,
+  buildToolResultEvent,
   appendEvent,
   readEvents,
   sessionLogPath,
@@ -24,6 +26,8 @@ test("createStats starts empty", () => {
   const s = createStats();
   assert.equal(s.totalToolCalls, 0);
   assert.equal(s.repairedToolCalls, 0);
+  assert.equal(s.failedToolResults, 0);
+  assert.equal(s.failuresByTool.size, 0);
   assert.equal(s.repairsByAction.size, 0);
 });
 
@@ -45,6 +49,16 @@ test("recordRepairs with no repairs does not mark the call repaired", () => {
   const s = createStats();
   recordRepairs(s, []);
   assert.equal(s.repairedToolCalls, 0);
+});
+
+test("recordToolFailure counts failed tool results by tool", () => {
+  const s = createStats();
+  recordToolFailure(s, "read");
+  recordToolFailure(s, "read");
+  recordToolFailure(s, "edit");
+  assert.equal(s.failedToolResults, 3);
+  assert.equal(s.failuresByTool.get("read"), 2);
+  assert.equal(s.failuresByTool.get("edit"), 1);
 });
 
 // ─── event construction ─────────────────────────────────────────────────
@@ -69,6 +83,22 @@ test("buildEvent with no repairs sets wasRepaired false", () => {
   const ev = buildEvent({ eventType: "tool_call", toolName: "read", provider: "p", model: "m", repairs: [], inputKeys: ["path"] });
   assert.equal(ev.wasRepaired, false);
   assert.deepEqual(ev.repairs, []);
+});
+
+test("buildToolResultEvent records bounded failure context", () => {
+  const ev = buildToolResultEvent({
+    toolName: "read",
+    provider: "p",
+    model: "m",
+    inputKeys: ["path"],
+    errorText: "ENOENT\nfull stack that should not all be kept",
+  });
+  assert.equal(ev.eventType, "tool_result");
+  assert.equal(ev.toolName, "read");
+  assert.equal(ev.wasError, true);
+  assert.equal(ev.errorKind, "ENOENT");
+  assert.equal(ev.inputKeys[0], "path");
+  assert.match(ev.errorText ?? "", /ENOENT/);
 });
 
 // ─── JSONL append + read round-trip ─────────────────────────────────────
@@ -146,4 +176,15 @@ test("statsSummary renders counts and percentages", () => {
   assert.match(out, /wrap-array.*1/);
   assert.match(out, /repairs applied : 3/);
   assert.match(out, /tool calls seen : 10/);
+});
+
+test("statsSummary renders failed tool results", () => {
+  const s = createStats();
+  recordToolFailure(s, "read");
+  recordToolFailure(s, "read");
+  recordToolFailure(s, "edit");
+  const out = statsSummary(s);
+  assert.match(out, /failed results : 3/);
+  assert.match(out, /read.*2/);
+  assert.match(out, /edit.*1/);
 });

@@ -171,3 +171,32 @@ test("welder-guidance command surfaces current recovery hints", async () => {
   assert.match(shown, /pi-welder recovery hints/);
   assert.match(shown, /verify the path/);
 });
+
+test("failing tool_result writes JSONL failure event and updates stats", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "welder-result-it-"));
+  try {
+    const c = loadExtension();
+    let shown = "";
+    const cx = ctx({
+      cwd: dir,
+      sessionId: "s-result",
+      ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} },
+    });
+    await c.handlers["session_start"]!({}, cx);
+    await c.handlers["tool_result"]!({ toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT: no such file" }, cx);
+
+    const file = path.join(dir, ".pi", "welder-log", "s-result.jsonl");
+    const lines = (await fs.readFile(file, "utf8")).trim().split("\n");
+    const ev = JSON.parse(lines[0]!);
+    assert.equal(ev.eventType, "tool_result");
+    assert.equal(ev.toolName, "read");
+    assert.equal(ev.wasError, true);
+    assert.equal(ev.errorKind, "ENOENT");
+
+    await c.commands["welder-stats"]!.handler("", cx);
+    assert.match(shown, /failed results : 1/);
+    assert.match(shown, /read.*1/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

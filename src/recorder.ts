@@ -22,18 +22,30 @@ export interface WelderEvent {
   repairs: string[];
   wasRepaired: boolean;
   inputKeys: string[];
+  wasError?: boolean;
+  errorKind?: string;
+  errorText?: string;
 }
 
 export interface Stats {
   totalToolCalls: number;
   repairedToolCalls: number;
+  failedToolResults: number;
+  failuresByTool: Map<string, number>;
   repairsByAction: Map<string, number>;
   sessionId: string | null;
 }
 
 /** Fresh per-session counters. */
 export function createStats(): Stats {
-  return { totalToolCalls: 0, repairedToolCalls: 0, repairsByAction: new Map(), sessionId: null };
+  return {
+    totalToolCalls: 0,
+    repairedToolCalls: 0,
+    failedToolResults: 0,
+    failuresByTool: new Map(),
+    repairsByAction: new Map(),
+    sessionId: null,
+  };
 }
 
 /** Fold a list of repairs for one tool call into session stats. */
@@ -45,6 +57,11 @@ export function recordRepairs(stats: Stats, repairs: Repair[]): void {
   }
 }
 
+export function recordToolFailure(stats: Stats, toolName: string): void {
+  stats.failedToolResults += 1;
+  stats.failuresByTool.set(toolName, (stats.failuresByTool.get(toolName) ?? 0) + 1);
+}
+
 interface BuildEventInput {
   eventType: "tool_call" | "tool_result";
   toolName: string;
@@ -52,6 +69,14 @@ interface BuildEventInput {
   model: string;
   repairs: Repair[];
   inputKeys: string[];
+}
+
+interface BuildToolResultEventInput {
+  toolName: string;
+  provider: string;
+  model: string;
+  inputKeys: string[];
+  errorText: string;
 }
 
 /** Assemble an event from inputs (ts stamped at call time). */
@@ -65,6 +90,22 @@ export function buildEvent(input: BuildEventInput): WelderEvent {
     repairs: input.repairs.map((r) => r.action),
     wasRepaired: input.repairs.length > 0,
     inputKeys: input.inputKeys,
+  };
+}
+
+export function buildToolResultEvent(input: BuildToolResultEventInput): WelderEvent {
+  return {
+    ts: new Date().toISOString(),
+    eventType: "tool_result",
+    toolName: input.toolName,
+    provider: input.provider,
+    model: input.model,
+    repairs: [],
+    wasRepaired: false,
+    inputKeys: input.inputKeys,
+    wasError: true,
+    errorKind: classifyErrorKind(input.errorText),
+    errorText: truncate(input.errorText, 500),
   };
 }
 
@@ -135,6 +176,7 @@ export function statsSummary(stats: Stats): string {
   lines.push(`tool calls seen : ${total}`);
   lines.push(`calls repaired  : ${repaired}${total ? ` (${Math.round((repaired / total) * 100)}%)` : ""}`);
   lines.push(`repairs applied : ${totalRepairs}`);
+  lines.push(`failed results : ${stats.failedToolResults}`);
 
   if (stats.repairsByAction.size > 0) {
     lines.push("", "by repair action:");
@@ -147,5 +189,30 @@ export function statsSummary(stats: Stats): string {
   } else {
     lines.push("", "(no repairs needed yet — inputs have been clean)");
   }
+
+  if (stats.failuresByTool.size > 0) {
+    lines.push("", "by failed tool:");
+    const rows = [...stats.failuresByTool.entries()].sort((a, b) => b[1] - a[1]);
+    const widest = Math.max(...rows.map((r) => r[0].length));
+    for (const [tool, count] of rows) {
+      const pct = stats.failedToolResults ? Math.round((count / stats.failedToolResults) * 100) : 0;
+      lines.push(`  ${tool.padEnd(widest)}  ${String(count).padStart(4)}  ${pct}%`);
+    }
+  }
   return lines.join("\n");
+}
+
+function classifyErrorKind(errorText: string): string {
+  const first = errorText.split(/\s|:/)[0]?.trim();
+  if (first && /^[A-Z][A-Z0-9_]+$/.test(first)) return first;
+  const lower = errorText.toLowerCase();
+  if (lower.includes("enoent") || lower.includes("no such file")) return "ENOENT";
+  if (lower.includes("edit_mismatch") || lower.includes("oldtext")) return "EDIT_MISMATCH";
+  if (lower.includes("schema") || lower.includes("invalid") || lower.includes("expected")) return "SCHEMA";
+  return "TOOL_ERROR";
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, Math.max(0, max - 1)) + "…";
 }

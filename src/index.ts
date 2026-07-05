@@ -16,12 +16,15 @@ import {
   createRecoveryState,
   recordToolResult,
   buildRecoveryGuidance,
+  extractToolErrorText,
   type RecoveryState,
 } from "./recovery.ts";
 import {
   createStats,
   recordRepairs,
+  recordToolFailure,
   buildEvent,
+  buildToolResultEvent,
   appendEvent,
   pruneOldSessions,
   statsSummary,
@@ -94,8 +97,18 @@ export default function (pi: ExtensionAPI) {
     return undefined;
   });
 
-  pi.on("tool_result", async (event: ToolResultEvent) => {
+  pi.on("tool_result", async (event: ToolResultEvent, ctx: ExtensionContext) => {
     recordToolResult(recovery, event);
+    const errorText = extractToolErrorText(event);
+    if (!errorText) return undefined;
+
+    recordToolFailure(stats, event.toolName);
+    await appendEvent(logDir(ctx), sessionId(ctx), buildToolResultEvent({
+      toolName: event.toolName,
+      ...modelMeta(ctx),
+      inputKeys: Object.keys(event.input ?? {}),
+      errorText,
+    })).catch(() => { /* logging never breaks recovery */ });
     return undefined;
   });
 
