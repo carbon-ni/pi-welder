@@ -105,6 +105,11 @@ export function consumeRecoveryGuidance(state: RecoveryState): RecoveryMessage[]
   return messages;
 }
 
+export function clearRecovery(state: RecoveryState): void {
+  state.failures = [];
+  state.deliveredSnapshot = null;
+}
+
 function firstLine(value: string): string {
   return truncate(value.split(/\r?\n/)[0] ?? value, 220);
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildRecoveryGuidance,
+  clearRecovery,
   consumeRecoveryGuidance,
   createRecoveryState,
   extractToolErrorText,
@@ -96,4 +97,16 @@ test("consumeRecoveryGuidance injects again when a new failure arrives", () => {
 
   recordToolResult(state, { toolName: "edit", input: {}, isError: true, content: "EDIT_MISMATCH" });
   assert.equal(consumeRecoveryGuidance(state).length, 1);
+});
+
+test("clearRecovery removes failures and delivered snapshot", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, { toolName: "read", input: {}, isError: true, content: "ENOENT" });
+  assert.equal(consumeRecoveryGuidance(state).length, 1);
+
+  clearRecovery(state);
+
+  assert.equal(state.failures.length, 0);
+  assert.equal(state.deliveredSnapshot, null);
+  assert.deepEqual(buildRecoveryGuidance(state), []);
 });

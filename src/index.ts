@@ -14,6 +14,7 @@ import type { ExtensionAPI, ToolCallEvent, ToolResultEvent, ContextEvent, Extens
 import { repairArgs } from "./repairs.ts";
 import {
   createRecoveryState,
+  clearRecovery,
   recordToolResult,
   buildRecoveryGuidance,
   consumeRecoveryGuidance,
@@ -165,6 +166,14 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const messages = buildRecoveryGuidance(recovery);
       ctx.ui.notify(messages[0]?.content ?? "pi-welder: no recent tool failures", "info");
+    },
+  });
+
+  pi.registerCommand("welder-clear", {
+    description: "Clear pending pi-welder recovery guidance",
+    handler: async (_args, ctx) => {
+      clearRecovery(recovery);
+      ctx.ui.notify("pi-welder: cleared pending recovery guidance", "info");
     },
   });
 }

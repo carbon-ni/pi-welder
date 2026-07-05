@@ -43,7 +43,7 @@ test("factory registers tool_call/tool_result/context + session handlers and all
   assert.ok(c.handlers["tool_result"], "tool_result handler registered");
   assert.ok(c.handlers["context"], "context handler registered");
   assert.ok(c.handlers["session_start"], "session_start handler registered");
-  for (const cmd of ["welder-stats", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance"]) {
+  for (const cmd of ["welder-stats", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance", "welder-clear"]) {
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
 });
@@ -183,6 +183,20 @@ test("welder-guidance command surfaces current recovery hints", async () => {
   await c.commands["welder-guidance"]!.handler("", cx);
   assert.match(shown, /pi-welder recovery hints/);
   assert.match(shown, /verify the path/);
+});
+
+test("welder-clear removes pending recovery guidance", async () => {
+  const c = loadExtension();
+  let shown = "";
+  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: true, content: "ENOENT" }, cx);
+
+  await c.commands["welder-clear"]!.handler("", cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
+  assert.equal(out, undefined);
+  assert.match(shown, /cleared/);
 });
 
 test("failing tool_result writes JSONL failure event and updates stats", async () => {
