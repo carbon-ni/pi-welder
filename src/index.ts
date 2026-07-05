@@ -19,6 +19,7 @@ import {
   buildRecoveryGuidance,
   consumeRecoveryGuidance,
   extractToolErrorText,
+  setRecoveryLimit,
   type RecoveryState,
 } from "./recovery.ts";
 import {
@@ -42,6 +43,12 @@ const modelMeta = (ctx: ExtensionContext) => ({
   provider: ctx.model?.provider ?? "unknown",
   model: ctx.model?.id ?? "unknown",
 });
+
+function parseLimitArg(args: string): number | null {
+  const raw = args.trim();
+  if (!/^\d+$/.test(raw)) return null;
+  return Number(raw);
+}
 
 // Session-scoped state. Reset on every session_start.
 let stats: Stats = createStats();
@@ -166,6 +173,24 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const messages = buildRecoveryGuidance(recovery);
       ctx.ui.notify(messages[0]?.content ?? "pi-welder: no recent tool failures", "info");
+    },
+  });
+
+  pi.registerCommand("welder-guidance-limit", {
+    description: "Set max recent tool failures included in recovery guidance (1-10)",
+    handler: async (args, ctx) => {
+      const limit = parseLimitArg(args);
+      if (limit === null) {
+        ctx.ui.notify("pi-welder: expected integer between 1 and 10", "error");
+        return;
+      }
+
+      try {
+        setRecoveryLimit(recovery, limit);
+        ctx.ui.notify(`pi-welder: guidance limit set to ${limit}`, "info");
+      } catch {
+        ctx.ui.notify("pi-welder: expected integer between 1 and 10", "error");
+      }
     },
   });
 

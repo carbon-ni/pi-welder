@@ -110,6 +110,19 @@ export function clearRecovery(state: RecoveryState): void {
   state.deliveredSnapshot = null;
 }
 
+export function setRecoveryLimit(state: RecoveryState, limit: number): void {
+  if (!Number.isInteger(limit)) {
+    throw new Error("recovery limit must be an integer");
+  }
+  if (limit < 1 || limit > 10) {
+    throw new Error("recovery limit must be between 1 and 10");
+  }
+
+  state.maxFailures = limit;
+  state.failures = state.failures.slice(-limit);
+  state.deliveredSnapshot = null;
+}
+
 function firstLine(value: string): string {
   return truncate(value.split(/\r?\n/)[0] ?? value, 220);
 }

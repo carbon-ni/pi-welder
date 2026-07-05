@@ -8,6 +8,7 @@ import {
   createRecoveryState,
   extractToolErrorText,
   recordToolResult,
+  setRecoveryLimit,
 } from "./recovery.ts";
 
 test("extractToolErrorText returns empty string for successful results", () => {
@@ -109,4 +110,25 @@ test("clearRecovery removes failures and delivered snapshot", () => {
   assert.equal(state.failures.length, 0);
   assert.equal(state.deliveredSnapshot, null);
   assert.deepEqual(buildRecoveryGuidance(state), []);
+});
+
+test("setRecoveryLimit updates limit and trims older failures", () => {
+  const state = createRecoveryState(4);
+  recordToolResult(state, { toolName: "one", input: {}, isError: true, content: "1" });
+  recordToolResult(state, { toolName: "two", input: {}, isError: true, content: "2" });
+  recordToolResult(state, { toolName: "three", input: {}, isError: true, content: "3" });
+
+  setRecoveryLimit(state, 2);
+
+  assert.equal(state.maxFailures, 2);
+  assert.deepEqual(state.failures.map((f) => f.toolName), ["two", "three"]);
+  assert.equal(state.deliveredSnapshot, null);
+});
+
+test("setRecoveryLimit rejects unsafe limits", () => {
+  const state = createRecoveryState();
+
+  assert.throws(() => setRecoveryLimit(state, 0), /between 1 and 10/);
+  assert.throws(() => setRecoveryLimit(state, 11), /between 1 and 10/);
+  assert.throws(() => setRecoveryLimit(state, 1.5), /integer/);
 });

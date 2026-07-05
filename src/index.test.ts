@@ -43,7 +43,7 @@ test("factory registers tool_call/tool_result/context + session handlers and all
   assert.ok(c.handlers["tool_result"], "tool_result handler registered");
   assert.ok(c.handlers["context"], "context handler registered");
   assert.ok(c.handlers["session_start"], "session_start handler registered");
-  for (const cmd of ["welder-stats", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance", "welder-clear"]) {
+  for (const cmd of ["welder-stats", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance", "welder-guidance-limit", "welder-clear"]) {
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
 });
@@ -197,6 +197,36 @@ test("welder-clear removes pending recovery guidance", async () => {
   const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
   assert.equal(out, undefined);
   assert.match(shown, /cleared/);
+});
+
+test("welder-guidance-limit updates max recent failures", async () => {
+  const c = loadExtension();
+  let shown = "";
+  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
+  await c.handlers["session_start"]!({}, cx);
+
+  await c.commands["welder-guidance-limit"]!.handler("2", cx);
+  await c.handlers["tool_result"]!({ toolName: "one", input: {}, isError: true, content: "1" }, cx);
+  await c.handlers["tool_result"]!({ toolName: "two", input: {}, isError: true, content: "2" }, cx);
+  await c.handlers["tool_result"]!({ toolName: "three", input: {}, isError: true, content: "3" }, cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
+  const content = out.messages[1].content;
+  assert.match(shown, /guidance limit set to 2/);
+  assert.doesNotMatch(content, /one failed/);
+  assert.match(content, /two failed/);
+  assert.match(content, /three failed/);
+});
+
+test("welder-guidance-limit rejects invalid values", async () => {
+  const c = loadExtension();
+  let shown = "";
+  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
+  await c.handlers["session_start"]!({}, cx);
+
+  await c.commands["welder-guidance-limit"]!.handler("0", cx);
+
+  assert.match(shown, /expected integer between 1 and 10/);
 });
 
 test("failing tool_result writes JSONL failure event and updates stats", async () => {
