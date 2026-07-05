@@ -6,7 +6,8 @@
   "description": "Pi extension that registers harness-level tool failures",
   "scripts": {
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
-    "check": "node --experimental-strip-types --test \"src/**/*.test.ts\""
+    "lint": "tsc --noEmit",
+    "check": "npm run lint && npm test"
   },
   "pi": {
     "extensions": ["./src/index.ts"]

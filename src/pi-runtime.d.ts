@@ -12,6 +12,17 @@ declare module "@earendil-works/pi-coding-agent" {
     input: Record<string, unknown>;
   }
 
+  export interface ToolResultEvent {
+    toolName: string;
+    input?: Record<string, unknown>;
+    isError?: boolean;
+    content?: unknown;
+  }
+
+  export interface ContextEvent {
+    messages: Array<Record<string, unknown>>;
+  }
+
   export interface ExtensionContext {
     hasUI: boolean;
     cwd: string;
@@ -25,7 +36,7 @@ declare module "@earendil-works/pi-coding-agent" {
 
   export interface ExtensionAPI {
     on(
-      event: "tool_call" | "tool_result" | "session_start" | "session_shutdown",
+      event: "tool_call" | "tool_result" | "context" | "session_start" | "session_shutdown",
       handler: (event: any, ctx: ExtensionContext) => Promise<unknown>,
     ): void;
     registerCommand(

@@ -37,11 +37,13 @@ function ctx(overrides: Partial<any> = {}): any {
   };
 }
 
-test("factory registers tool_call + session handlers and all commands", () => {
+test("factory registers tool_call/tool_result/context + session handlers and all commands", () => {
   const c = loadExtension();
   assert.ok(c.handlers["tool_call"], "tool_call handler registered");
+  assert.ok(c.handlers["tool_result"], "tool_result handler registered");
+  assert.ok(c.handlers["context"], "context handler registered");
   assert.ok(c.handlers["session_start"], "session_start handler registered");
-  for (const cmd of ["welder-stats", "welder-on", "welder-off", "welder-toggle", "welder-log"]) {
+  for (const cmd of ["welder-stats", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance"]) {
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
 });
@@ -129,4 +131,43 @@ test("welder-stats surfaces repairs counted in-session", async () => {
   await c.commands["welder-stats"]!.handler("", cx);
   assert.match(shown, /parse-json/);
   assert.match(shown, /strip-null/);
+});
+
+test("tool_result failures inject recovery guidance into next context", async () => {
+  const c = loadExtension();
+  const cx = ctx();
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_result"]!({
+    toolName: "edit",
+    input: { path: "a.ts", oldText: "missing" },
+    isError: true,
+    content: [{ type: "text", text: "EDIT_MISMATCH: oldText not found" }],
+  }, cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "retry" }] }, cx) as any;
+  assert.equal(out.messages.length, 2);
+  assert.match(out.messages[1].content, /pi-welder recovery hints/);
+  assert.match(out.messages[1].content, /read a fresh snippet/);
+});
+
+test("successful tool_result clears guidance for that tool", async () => {
+  const c = loadExtension();
+  const cx = ctx();
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: true, content: "ENOENT" }, cx);
+  await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: false, content: "ok" }, cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
+  assert.equal(out, undefined);
+});
+
+test("welder-guidance command surfaces current recovery hints", async () => {
+  const c = loadExtension();
+  let shown = "";
+  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_result"]!({ toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT" }, cx);
+  await c.commands["welder-guidance"]!.handler("", cx);
+  assert.match(shown, /pi-welder recovery hints/);
+  assert.match(shown, /verify the path/);
 });

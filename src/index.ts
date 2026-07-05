@@ -10,8 +10,14 @@
  */
 
 import * as path from "node:path";
-import type { ExtensionAPI, ToolCallEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEvent, ToolResultEvent, ContextEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { repairArgs } from "./repairs.ts";
+import {
+  createRecoveryState,
+  recordToolResult,
+  buildRecoveryGuidance,
+  type RecoveryState,
+} from "./recovery.ts";
 import {
   createStats,
   recordRepairs,
@@ -34,11 +40,13 @@ const modelMeta = (ctx: ExtensionContext) => ({
 
 // Session-scoped state. Reset on every session_start.
 let stats: Stats = createStats();
+let recovery: RecoveryState = createRecoveryState();
 let enabled = true;
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     stats = createStats();
+    recovery = createRecoveryState();
     stats.sessionId = sessionId(ctx);
     enabled = true;
     await pruneOldSessions(logDir(ctx), SESSION_RETENTION).catch(() => {});
@@ -86,6 +94,17 @@ export default function (pi: ExtensionAPI) {
     return undefined;
   });
 
+  pi.on("tool_result", async (event: ToolResultEvent) => {
+    recordToolResult(recovery, event);
+    return undefined;
+  });
+
+  pi.on("context", async (event: ContextEvent) => {
+    const messages = buildRecoveryGuidance(recovery);
+    if (messages.length === 0) return undefined;
+    return { messages: [...event.messages, ...messages] };
+  });
+
   // ─── Commands ──────────────────────────────────────────────────────────
 
   pi.registerCommand("welder-stats", {
@@ -124,6 +143,14 @@ export default function (pi: ExtensionAPI) {
     description: "Show the path to this session's welder repair log",
     handler: async (_args, ctx) => {
       ctx.ui.notify(sessionLogPath(logDir(ctx), sessionId(ctx)), "info");
+    },
+  });
+
+  pi.registerCommand("welder-guidance", {
+    description: "Show current pi-welder recovery guidance from recent tool failures",
+    handler: async (_args, ctx) => {
+      const messages = buildRecoveryGuidance(recovery);
+      ctx.ui.notify(messages[0]?.content ?? "pi-welder: no recent tool failures", "info");
     },
   });
 }
