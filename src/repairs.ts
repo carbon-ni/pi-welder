@@ -171,6 +171,7 @@ export interface RuleResult {
 export interface RepairOptions {
   toolName?: string;
   rules?: readonly RepairRule[];
+  extraRules?: readonly RepairRule[];
 }
 
 export interface RepairRule {
@@ -260,7 +261,8 @@ function repairValue(value: unknown, key: string, fieldPath: string, options: Re
   const repairs: Repair[] = [];
   const ctx: RepairContext = { key, fieldPath, parsedFromString: false, toolName: options.toolName };
 
-  for (const rule of options.rules ?? repairRules) {
+  const rules = options.rules ?? [...repairRules, ...(options.extraRules ?? [])];
+  for (const rule of rules) {
     const result = rule.repair(value, ctx);
     value = result.value;
     repairs.push(...result.repairs);

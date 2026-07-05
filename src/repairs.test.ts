@@ -309,6 +309,26 @@ test("repair rule order is explicit", () => {
   ]);
 });
 
+test("custom repair rules can extend default repairs", () => {
+  const markSearchTarget: RepairRule = {
+    action: "clean-path",
+    repair(value, ctx) {
+      if (ctx.toolName !== "search" || ctx.key !== "target" || typeof value !== "string") {
+        return { value, repairs: [] };
+      }
+      return { value: value.toUpperCase(), repairs: [{ field: ctx.fieldPath, action: "clean-path" }] };
+    },
+  };
+
+  const { result, repairs } = repairArgs(
+    { path: " src/a.ts ", target: "abc" },
+    { toolName: "search", extraRules: [markSearchTarget] },
+  );
+
+  assert.deepEqual(result, { path: "src/a.ts", target: "ABC" });
+  assert.deepEqual(repairs.map((r) => r.action), ["clean-path", "clean-path"]);
+});
+
 test("repair rules receive tool context for tool-specific fixes", () => {
   const uppercaseTargetForSearch: RepairRule = {
     action: "clean-path",
