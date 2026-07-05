@@ -1,5 +1,5 @@
 import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { repairArgs } from "./repairs.ts";
+import { repairArgs, type Repair } from "./repairs.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -17,6 +17,11 @@ import { logDir, modelMeta, sessionId } from "./pi-context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
+
+interface ToolInputRepair {
+  result: Record<string, unknown>;
+  repairs: Repair[];
+}
 
 export async function handleSessionStart(
   runtime: WelderRuntime,
@@ -41,38 +46,58 @@ export async function handleToolCall(
 ): Promise<undefined> {
   const input = event.input;
   if (!input || typeof input !== "object") return undefined;
-  runtime.stats.totalToolCalls++;
 
-  const { result, repairs } = repairArgs(input, { toolName: event.toolName });
+  const repair = repairToolInput(runtime, event.toolName, input as Record<string, unknown>);
+  if (runtime.enabled && repair.repairs.length > 0) {
+    applyRepairedInput(input as Record<string, unknown>, repair.result);
+    if (ctx.hasUI) ctx.ui.setStatus("welder", repairStatusText(event.toolName, repair.repairs));
+  }
+
+  await recordRepairEvent(ctx, event.toolName, repair);
+  return undefined;
+}
+
+export function repairToolInput(
+  runtime: WelderRuntime,
+  toolName: string,
+  input: Record<string, unknown>,
+): ToolInputRepair {
+  runtime.stats.totalToolCalls++;
+  const repair = repairArgs(input, { toolName });
 
   // In-memory stats always track the signal, even when repairs are off.
-  if (repairs.length > 0) recordRepairs(runtime.stats, repairs);
+  if (repair.repairs.length > 0) recordRepairs(runtime.stats, repair.repairs);
+  return repair;
+}
 
-  if (runtime.enabled && repairs.length > 0) {
-    // Apply repairs by mutating event.input in place — this is what the tool receives.
-    for (const key of Object.keys(input)) delete input[key];
-    Object.assign(input, result);
+export function applyRepairedInput(input: Record<string, unknown>, result: Record<string, unknown>): void {
+  // Mutate in place — this is what the tool receives.
+  for (const key of Object.keys(input)) delete input[key];
+  Object.assign(input, result);
+}
 
-    if (ctx.hasUI) {
-      const preview = repairs.slice(0, 2).map((r) => r.action).join(", ");
-      const more = repairs.length > 2 ? ` (+${repairs.length - 2})` : "";
-      ctx.ui.setStatus("welder", `🔧 ${event.toolName}: ${preview}${more}`);
-    }
-  }
+export function repairStatusText(toolName: string, repairs: Repair[]): string {
+  const preview = repairs.slice(0, 2).map((r) => r.action).join(", ");
+  const more = repairs.length > 2 ? ` (+${repairs.length - 2})` : "";
+  return `🔧 ${toolName}: ${preview}${more}`;
+}
 
+async function recordRepairEvent(
+  ctx: ExtensionContext,
+  toolName: string,
+  repair: ToolInputRepair,
+): Promise<void> {
   // Log only the signal (repaired calls). Clean calls are counted in-memory only,
   // keeping the JSONL focused on what actually went wrong.
-  if (repairs.length > 0) {
-    await appendEvent(logDir(ctx), sessionId(ctx), buildEvent({
-      eventType: "tool_call",
-      toolName: event.toolName,
-      ...modelMeta(ctx),
-      repairs,
-      inputKeys: Object.keys(result),
-    })).catch(() => { /* logging never breaks the tool call */ });
-  }
+  if (repair.repairs.length === 0) return;
 
-  return undefined;
+  await appendEvent(logDir(ctx), sessionId(ctx), buildEvent({
+    eventType: "tool_call",
+    toolName,
+    ...modelMeta(ctx),
+    repairs: repair.repairs,
+    inputKeys: Object.keys(repair.result),
+  })).catch(() => { /* logging never breaks the tool call */ });
 }
 
 export async function handleToolResult(
