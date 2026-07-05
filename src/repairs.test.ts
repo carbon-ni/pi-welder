@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   repairArgs,
+  objectRepairRules,
   unwrapMarkdownLink,
   tryParseJsonString,
   coerceToBoolean,
@@ -223,6 +224,11 @@ test("does not inject defaults when both present", () => {
 test("repairArgs applies relational defaults end-to-end", () => {
   const { result } = repairArgs({ path: "a.ts", limit: 50 });
   assert.equal(result.offset, 1);
+});
+
+test("default object repair rules are explicit and immutable", () => {
+  assert.deepEqual(objectRepairRules.map((rule) => rule.action), ["relational-default"]);
+  assert.equal(Object.isFrozen(objectRepairRules), true);
 });
 
 test("custom object repair rules can extend top-level defaults", () => {
