@@ -164,6 +164,40 @@ export const FALSY_STRINGS: ReadonlySet<string> = new Set([
 ]);
 
 /** A field name looks like a path/URL/flag token rather than a file path. */
+export function isPathField(key: string): boolean {
+  return PATH_FIELDS.has(key);
+}
+
+export function isArrayField(key: string): boolean {
+  if (ARRAY_FIELDS.has(key)) return true;
+  const lower = key.toLowerCase();
+  return (
+    lower.endsWith("_list") || lower.endsWith("list") ||
+    lower.endsWith("_names") || lower.endsWith("names") ||
+    lower.endsWith("_items") || lower.endsWith("items") ||
+    lower.endsWith("_array") || lower.endsWith("array")
+  );
+}
+
+export function isBooleanField(key: string): boolean {
+  if (BOOLEAN_FIELDS.has(key)) return true;
+  const lower = key.toLowerCase();
+  return (
+    lower.startsWith("is_") || lower.startsWith("has_") ||
+    lower.startsWith("can_") || lower.endsWith("_flag")
+  );
+}
+
+export function isNumberField(key: string): boolean {
+  if (NUMBER_FIELDS.has(key)) return true;
+  const lower = key.toLowerCase();
+  return (
+    lower.startsWith("max") || lower.startsWith("min") ||
+    lower.endsWith("_count") || lower.endsWith("_size") ||
+    lower.endsWith("_index")
+  );
+}
+
 export function isUrlOrFlag(token: string): boolean {
   return token.startsWith("http") || token.startsWith("-");
 }

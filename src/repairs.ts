@@ -11,15 +11,15 @@
  */
 
 import {
-  PATH_FIELDS,
-  ARRAY_FIELDS,
-  BOOLEAN_FIELDS,
-  NUMBER_FIELDS,
   CONTENT_FIELDS,
   ARRAY_ITEM_SCHEMAS,
   NULL_LIKE_STRINGS,
   TRUTHY_STRINGS,
   FALSY_STRINGS,
+  isPathField,
+  isArrayField,
+  isBooleanField,
+  isNumberField,
 } from "./fields.ts";
 
 export type RepairAction =
@@ -115,42 +115,6 @@ export function trySplitStringToArray(value: unknown): unknown {
     if (parts.length > 1) return parts;
   }
   return value;
-}
-
-// ─── Field classification (name + value → which repairs apply) ──────────
-
-function isPathField(key: string): boolean {
-  return PATH_FIELDS.has(key);
-}
-
-function isArrayField(key: string): boolean {
-  if (ARRAY_FIELDS.has(key)) return true;
-  const lower = key.toLowerCase();
-  return (
-    lower.endsWith("_list") || lower.endsWith("list") ||
-    lower.endsWith("_names") || lower.endsWith("names") ||
-    lower.endsWith("_items") || lower.endsWith("items") ||
-    lower.endsWith("_array") || lower.endsWith("array")
-  );
-}
-
-function isBooleanField(key: string): boolean {
-  if (BOOLEAN_FIELDS.has(key)) return true;
-  const lower = key.toLowerCase();
-  return (
-    lower.startsWith("is_") || lower.startsWith("has_") ||
-    lower.startsWith("can_") || lower.endsWith("_flag")
-  );
-}
-
-function isNumberField(key: string): boolean {
-  if (NUMBER_FIELDS.has(key)) return true;
-  const lower = key.toLowerCase();
-  return (
-    lower.startsWith("max") || lower.startsWith("min") ||
-    lower.endsWith("_count") || lower.endsWith("_size") ||
-    lower.endsWith("_index")
-  );
 }
 
 // ─── Per-value repair dispatch ──────────────────────────────────────────
