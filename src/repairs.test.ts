@@ -140,9 +140,28 @@ test("splits comma-separated string into array", () => {
   assert.ok(repairs.some((r) => r.action === "split-string"));
 });
 
-test("does not split path-like strings (wraps them instead)", () => {
+test("does not split a single path-like string (wraps it instead)", () => {
   const { result, repairs } = repairArgs({ tags: "src/a.ts" });
   assert.deepEqual(result.tags, ["src/a.ts"]);
+  assert.ok(!repairs.some((r) => r.action === "split-string"));
+});
+
+test("splits comma-separated path list into array", () => {
+  const { result, repairs } = repairArgs({ paths: "src/a.ts, src/b.ts" });
+  assert.deepEqual(result.paths, ["src/a.ts", "src/b.ts"]);
+  assert.ok(repairs.some((r) => r.action === "split-string"));
+});
+
+test("splits newline-separated path list into array", () => {
+  const { result, repairs } = repairArgs({ paths: "src/a.ts\nsrc/b.ts" });
+  assert.deepEqual(result.paths, ["src/a.ts", "src/b.ts"]);
+  assert.ok(repairs.some((r) => r.action === "split-string"));
+});
+
+test("does not split a space-separated path list (ambiguous with path spaces)", () => {
+  const { result, repairs } = repairArgs({ paths: "src/a.ts src/b.ts" });
+  // Space is ambiguous: a path may contain spaces. Wrap as-is rather than guess.
+  assert.deepEqual(result.paths, ["src/a.ts src/b.ts"]);
   assert.ok(!repairs.some((r) => r.action === "split-string"));
 });
 
@@ -314,6 +333,15 @@ test("trySplitStringToArray: comma + space, not paths", () => {
   assert.deepEqual(trySplitStringToArray("foo bar"), ["foo", "bar"]);
   assert.equal(trySplitStringToArray("src/a.ts"), "src/a.ts");
   assert.equal(trySplitStringToArray(42), 42);
+});
+
+test("trySplitStringToArray: splits comma/newline lists even when items are paths", () => {
+  assert.deepEqual(trySplitStringToArray("src/a.ts, src/b.ts"), ["src/a.ts", "src/b.ts"]);
+  assert.deepEqual(trySplitStringToArray("src/a.ts\nsrc/b.ts"), ["src/a.ts", "src/b.ts"]);
+});
+
+test("trySplitStringToArray: does not split path-like string on spaces", () => {
+  assert.equal(trySplitStringToArray("src/a.ts src/b.ts"), "src/a.ts src/b.ts");
 });
 
 // ─── content-field safety across the board ──────────────────────────────

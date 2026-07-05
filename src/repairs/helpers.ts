@@ -55,18 +55,26 @@ export function isNullLikeString(value: unknown): boolean {
   return NULL_LIKE_STRINGS.has(value.trim().toLowerCase());
 }
 
-/** Split a comma/space-delimited string into an array; leave paths alone. */
+/** Split a comma/newline-delimited string into an array; leave paths alone on spaces. */
 export function trySplitStringToArray(value: unknown): unknown {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   if (!trimmed) return value;
   if (trimmed.startsWith("[") || trimmed.startsWith("{")) return value; // JSON's job
-  if (trimmed.includes("/") || trimmed.includes("\\")) return value; // path
 
+  // Unambiguous delimiters: comma and newline. Split even when items are paths.
   if (trimmed.includes(",")) {
     const parts = trimmed.split(",").map((s) => s.trim()).filter(Boolean);
     if (parts.length > 1) return parts;
   }
+  if (trimmed.includes("\n")) {
+    const parts = trimmed.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 1) return parts;
+  }
+
+  // Ambiguous delimiter: space. A path may contain spaces, so do not guess.
+  if (trimmed.includes("/") || trimmed.includes("\\")) return value; // path
+
   if (trimmed.includes(" ") && !trimmed.includes("http")) {
     const parts = trimmed.split(/\s+/).map((s) => s.trim()).filter(Boolean);
     if (parts.length > 1) return parts;
