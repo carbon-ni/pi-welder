@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildRecoveryGuidance,
+  consumeRecoveryGuidance,
   createRecoveryState,
   extractToolErrorText,
   recordToolResult,
@@ -74,4 +75,25 @@ test("buildRecoveryGuidance injects compact tool-failure guidance", () => {
   assert.match(messages[0]?.content ?? "", /edit/);
   assert.match(messages[0]?.content ?? "", /EDIT_MISMATCH/);
   assert.match(messages[0]?.content ?? "", /read a fresh snippet/i);
+});
+
+test("consumeRecoveryGuidance injects once for an unchanged failure snapshot", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, { toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT" });
+
+  const first = consumeRecoveryGuidance(state);
+  const second = consumeRecoveryGuidance(state);
+
+  assert.equal(first.length, 1);
+  assert.deepEqual(second, []);
+});
+
+test("consumeRecoveryGuidance injects again when a new failure arrives", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, { toolName: "read", input: {}, isError: true, content: "ENOENT" });
+  assert.equal(consumeRecoveryGuidance(state).length, 1);
+  assert.equal(consumeRecoveryGuidance(state).length, 0);
+
+  recordToolResult(state, { toolName: "edit", input: {}, isError: true, content: "EDIT_MISMATCH" });
+  assert.equal(consumeRecoveryGuidance(state).length, 1);
 });

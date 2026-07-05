@@ -16,6 +16,7 @@ import {
   createRecoveryState,
   recordToolResult,
   buildRecoveryGuidance,
+  consumeRecoveryGuidance,
   extractToolErrorText,
   type RecoveryState,
 } from "./recovery.ts";
@@ -113,7 +114,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("context", async (event: ContextEvent) => {
-    const messages = buildRecoveryGuidance(recovery);
+    const messages = consumeRecoveryGuidance(recovery);
     if (messages.length === 0) return undefined;
     return { messages: [...event.messages, ...messages] };
   });

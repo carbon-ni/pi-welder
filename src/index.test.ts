@@ -161,6 +161,19 @@ test("successful tool_result clears guidance for that tool", async () => {
   assert.equal(out, undefined);
 });
 
+test("context guidance is injected only once per unchanged failure snapshot", async () => {
+  const c = loadExtension();
+  const cx = ctx();
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: true, content: "ENOENT" }, cx);
+
+  const first = await c.handlers["context"]!({ messages: [{ role: "user", content: "first" }] }, cx) as any;
+  const second = await c.handlers["context"]!({ messages: [{ role: "user", content: "second" }] }, cx) as any;
+
+  assert.equal(first.messages.length, 2);
+  assert.equal(second, undefined);
+});
+
 test("welder-guidance command surfaces current recovery hints", async () => {
   const c = loadExtension();
   let shown = "";

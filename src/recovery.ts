@@ -23,6 +23,7 @@ export interface FailureRecord {
 export interface RecoveryState {
   failures: FailureRecord[];
   maxFailures: number;
+  deliveredSnapshot: string | null;
 }
 
 export interface RecoveryMessage {
@@ -31,7 +32,7 @@ export interface RecoveryMessage {
 }
 
 export function createRecoveryState(maxFailures = 3): RecoveryState {
-  return { failures: [], maxFailures };
+  return { failures: [], maxFailures, deliveredSnapshot: null };
 }
 
 export function extractToolErrorText(result: Pick<ToolResultLike, "isError" | "content">): string {
@@ -62,6 +63,7 @@ export function recordToolResult(state: RecoveryState, result: ToolResultLike): 
 
   if (!errorText) {
     state.failures = state.failures.filter((f) => f.toolName !== result.toolName);
+    state.deliveredSnapshot = null;
     return;
   }
 
@@ -75,6 +77,7 @@ export function recordToolResult(state: RecoveryState, result: ToolResultLike): 
   if (state.failures.length > state.maxFailures) {
     state.failures = state.failures.slice(-state.maxFailures);
   }
+  state.deliveredSnapshot = null;
 }
 
 export function buildRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
@@ -94,6 +97,14 @@ export function buildRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
   return [{ role: "system", content: lines.join("\n") }];
 }
 
+export function consumeRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
+  const snapshot = recoverySnapshot(state);
+  if (!snapshot || snapshot === state.deliveredSnapshot) return [];
+  const messages = buildRecoveryGuidance(state);
+  if (messages.length > 0) state.deliveredSnapshot = snapshot;
+  return messages;
+}
+
 function firstLine(value: string): string {
   return truncate(value.split(/\r?\n/)[0] ?? value, 220);
 }
@@ -110,6 +121,13 @@ function failureHint(errorText: string): string {
     return "fix argument shape/types before retrying; do not repeat identical JSON.";
   }
   return "inspect the failure and retry with changed arguments.";
+}
+
+function recoverySnapshot(state: RecoveryState): string {
+  if (state.failures.length === 0) return "";
+  return state.failures
+    .map((f) => [f.toolName, f.ts, f.errorText].join("\0"))
+    .join("\0\0");
 }
 
 function truncate(value: string, max: number): string {
