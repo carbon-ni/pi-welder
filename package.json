@@ -1,0 +1,14 @@
+{
+  "name": "pi-welder",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension that registers harness-level tool failures",
+  "scripts": {
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "check": "node --experimental-strip-types --test \"src/**/*.test.ts\""
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  }
+}

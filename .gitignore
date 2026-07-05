@@ -1,0 +1,8 @@
+# Build artifacts
+node_modules/
+
+# OS
+.DS_Store
+
+# Local scratch
+.tmp/
