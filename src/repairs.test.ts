@@ -10,6 +10,7 @@ import {
   isNullLikeString,
   trySplitStringToArray,
   applyRelationalDefaults,
+  repairRules,
   type RepairAction,
 } from "./repairs.ts";
 
@@ -288,6 +289,17 @@ test("never repairs command content even if it looks numeric or null-ish", () =>
   assert.equal(result.command, "echo 42");
   assert.equal(result.code, "null != nil");
   assert.equal(repairs.length, 0);
+});
+
+test("repair rule order is explicit", () => {
+  assert.deepEqual(repairRules.map((rule) => rule.action), [
+    "clean-path",
+    "parse-json",
+    "array-shape",
+    "coerce-boolean",
+    "coerce-number",
+    "strip-extra-props",
+  ]);
 });
 
 test("all repair actions are documented spellings", () => {

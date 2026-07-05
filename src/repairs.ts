@@ -155,90 +155,112 @@ function isNumberField(key: string): boolean {
 
 // ─── Per-value repair dispatch ──────────────────────────────────────────
 
+interface RepairContext {
+  key: string;
+  fieldPath: string;
+  parsedFromString: boolean;
+}
+
+interface RuleResult {
+  value: unknown;
+  repairs: Repair[];
+  parsedFromString?: boolean;
+}
+
+export interface RepairRule {
+  /** Stable registry name; array-shape may emit split/wrap repair actions. */
+  action: RepairAction | "array-shape";
+  repair(value: unknown, ctx: RepairContext): RuleResult;
+}
+
+const unchanged = (value: unknown): RuleResult => ({ value, repairs: [] });
+
+export const repairRules: RepairRule[] = [
+  {
+    action: "clean-path",
+    repair(value, ctx) {
+      if (!isPathField(ctx.key) || typeof value !== "string") return unchanged(value);
+      const cleaned = unwrapMarkdownLink(value).trim();
+      if (cleaned === value) return unchanged(value);
+      return { value: cleaned, repairs: [{ field: ctx.fieldPath, action: "clean-path" }] };
+    },
+  },
+  {
+    action: "parse-json",
+    repair(value, ctx) {
+      if (typeof value !== "string") return unchanged(value);
+      const parsed = tryParseJsonString(value);
+      if (parsed === value) return unchanged(value);
+      return {
+        value: parsed,
+        parsedFromString: true,
+        repairs: [{ field: ctx.fieldPath, action: "parse-json" }],
+      };
+    },
+  },
+  {
+    action: "array-shape",
+    repair(value, ctx) {
+      if (!isArrayField(ctx.key) || ctx.parsedFromString || Array.isArray(value)) return unchanged(value);
+      if (typeof value === "string") {
+        const split = trySplitStringToArray(value);
+        if (Array.isArray(split)) {
+          return { value: split, repairs: [{ field: ctx.fieldPath, action: "split-string" }] };
+        }
+        if (looksLikeJsonLiteral(value)) return unchanged(value);
+        return { value: [value], repairs: [{ field: ctx.fieldPath, action: "wrap-array" }] };
+      }
+      if (typeof value === "object" && value !== null) {
+        return { value: [value], repairs: [{ field: ctx.fieldPath, action: "wrap-object-array" }] };
+      }
+      if (value === null || value === undefined) return unchanged(value);
+      return { value: [value], repairs: [{ field: ctx.fieldPath, action: "wrap-array" }] };
+    },
+  },
+  {
+    action: "coerce-boolean",
+    repair(value, ctx) {
+      if (!isBooleanField(ctx.key) || typeof value !== "string") return unchanged(value);
+      const coerced = coerceToBoolean(value);
+      if (coerced === value) return unchanged(value);
+      return { value: coerced, repairs: [{ field: ctx.fieldPath, action: "coerce-boolean" }] };
+    },
+  },
+  {
+    action: "coerce-number",
+    repair(value, ctx) {
+      if (!isNumberField(ctx.key) || typeof value !== "string") return unchanged(value);
+      const coerced = coerceToNumber(value);
+      if (coerced === value) return unchanged(value);
+      return { value: coerced, repairs: [{ field: ctx.fieldPath, action: "coerce-number" }] };
+    },
+  },
+  {
+    action: "strip-extra-props",
+    repair(value, ctx) {
+      if (!Array.isArray(value) || !ARRAY_ITEM_SCHEMAS.has(ctx.key)) return unchanged(value);
+      const [cleaned, changed] = stripExtraProps(value, ctx.key);
+      if (!changed) return unchanged(value);
+      return { value: cleaned, repairs: [{ field: ctx.fieldPath, action: "strip-extra-props" }] };
+    },
+  },
+];
+
 /**
- * Apply the structural repairs that a single field value needs.
- * Returns [value, repairs]. Recurses into arrays/objects after type changes.
- *
- * Ordering principle for array fields receiving a string:
- *   parse-json  →  split  →  wrap residual single value.
- * A value that emerged from JSON parsing is the model's final intent and is
- * NEVER re-wrapped. A string that looks like a botched JSON literal
- * (`[...`/`{...` that failed to parse) is left untouched for the tool to reject.
+ * Apply ordered structural repairs to a single field value.
+ * Registry order is the extension point: parse-json → array-shape matters.
  */
 function repairValue(value: unknown, key: string, fieldPath: string): [unknown, Repair[]] {
   const repairs: Repair[] = [];
+  const ctx: RepairContext = { key, fieldPath, parsedFromString: false };
 
-  // 1. clean-path — unwrap markdown auto-links + trim (paths only)
-  if (isPathField(key) && typeof value === "string") {
-    const cleaned = unwrapMarkdownLink(value).trim();
-    if (cleaned !== value) {
-      value = cleaned;
-      repairs.push({ field: fieldPath, action: "clean-path" });
-    }
+  for (const rule of repairRules) {
+    const result = rule.repair(value, ctx);
+    value = result.value;
+    repairs.push(...result.repairs);
+    ctx.parsedFromString = ctx.parsedFromString || result.parsedFromString === true;
   }
 
-  // 2. parse-json — stringified arrays/objects → real structures.
-  //    If this fires, the parsed structure is final: skip wrap/split below.
-  let parsedFromString = false;
-  if (typeof value === "string") {
-    const parsed = tryParseJsonString(value);
-    if (parsed !== value) {
-      value = parsed;
-      parsedFromString = true;
-      repairs.push({ field: fieldPath, action: "parse-json" });
-    }
-  }
-
-  // 3. array-field structure resolution — only when not already resolved by
-  //    parse-json and not already an array.
-  if (isArrayField(key) && !parsedFromString && !Array.isArray(value)) {
-    if (typeof value === "string") {
-      const split = trySplitStringToArray(value);
-      if (Array.isArray(split)) {
-        value = split;
-        repairs.push({ field: fieldPath, action: "split-string" });
-      } else if (!looksLikeJsonLiteral(value)) {
-        value = [value];
-        repairs.push({ field: fieldPath, action: "wrap-array" });
-      }
-      // else: a botched JSON literal (`[oops`) — leave for the tool to reject.
-    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      value = [value];
-      repairs.push({ field: fieldPath, action: "wrap-object-array" });
-    } else if (value !== null && value !== undefined) {
-      value = [value];
-      repairs.push({ field: fieldPath, action: "wrap-array" });
-    }
-  }
-
-  // 4. coerce-boolean
-  if (isBooleanField(key) && typeof value === "string") {
-    const coerced = coerceToBoolean(value);
-    if (coerced !== value) {
-      value = coerced;
-      repairs.push({ field: fieldPath, action: "coerce-boolean" });
-    }
-  }
-
-  // 5. coerce-number
-  if (isNumberField(key) && typeof value === "string") {
-    const coerced = coerceToNumber(value);
-    if (coerced !== value) {
-      value = coerced;
-      repairs.push({ field: fieldPath, action: "coerce-number" });
-    }
-  }
-
-  // 6. strip-extra-props — enforce array-item schemas
-  if (Array.isArray(value) && ARRAY_ITEM_SCHEMAS.has(key)) {
-    const [cleaned, changed] = stripExtraProps(value, key);
-    if (changed) {
-      value = cleaned;
-      repairs.push({ field: fieldPath, action: "strip-extra-props" });
-    }
-  }
-
-  // 7. recurse into structures after type changes settle
   if (Array.isArray(value)) {
     const items: unknown[] = [];
     for (let i = 0; i < value.length; i++) {
