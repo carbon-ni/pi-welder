@@ -187,7 +187,7 @@ export interface RepairRule {
 
 const unchanged = (value: unknown): RuleResult => ({ value, repairs: [] });
 
-export const repairRules: RepairRule[] = [
+export const repairRules: readonly RepairRule[] = Object.freeze([
   {
     action: "clean-path",
     repair(value, ctx) {
@@ -256,7 +256,7 @@ export const repairRules: RepairRule[] = [
       return { value: cleaned, repairs: [{ field: ctx.fieldPath, action: "strip-extra-props" }] };
     },
   },
-];
+]);
 
 /**
  * Apply ordered structural repairs to a single field value.

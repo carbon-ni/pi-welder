@@ -309,6 +309,10 @@ test("repair rule order is explicit", () => {
   ]);
 });
 
+test("default repair rules are immutable", () => {
+  assert.equal(Object.isFrozen(repairRules), true);
+});
+
 test("custom repair rules can extend default repairs", () => {
   const markSearchTarget: RepairRule = {
     action: "clean-path",
