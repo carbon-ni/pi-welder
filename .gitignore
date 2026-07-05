@@ -6,3 +6,6 @@ node_modules/
 
 # Local scratch
 .tmp/
+
+# pi-welder repair logs
+.pi/welder-log/
