@@ -1,5 +1,9 @@
 import type { ObjectRepairRule, Repair, RepairResult } from "./types.ts";
 
+/** Flat edit-field spellings the model emits at top level instead of in `edits`. */
+const OLD_TEXT_KEYS = ["oldText", "old_text"] as const;
+const NEW_TEXT_KEYS = ["newText", "new_text"] as const;
+
 const relationalDefaultRule: ObjectRepairRule = {
   action: "relational-default",
   repair(input, ctx) {
@@ -17,8 +21,39 @@ const relationalDefaultRule: ObjectRepairRule = {
   },
 };
 
+/**
+ * When the edit tool receives flat `oldText`/`newText` at top level (no
+ * `edits` array), nest them into `edits: [{...}]`. Content stays verbatim.
+ */
+const nestEditFieldsRule: ObjectRepairRule = {
+  action: "nest-edit-fields",
+  repair(input, ctx) {
+    if (ctx.toolName !== "edit") return { result: input, repairs: [] };
+    if ("edits" in input) return { result: input, repairs: [] };
+
+    const oldKey = OLD_TEXT_KEYS.find((k) => k in input);
+    if (!oldKey) return { result: input, repairs: [] };
+
+    const newKey = NEW_TEXT_KEYS.find((k) => k in input);
+    const edit: Record<string, unknown> = { [oldKey]: input[oldKey] };
+    if (newKey) edit[newKey] = input[newKey];
+
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input)) {
+      if (k === oldKey || k === newKey) continue;
+      result[k] = v;
+    }
+    result.edits = [edit];
+    return {
+      result,
+      repairs: [{ field: `${ctx.parentPath}.edits`, action: "nest-edit-fields" }],
+    };
+  },
+};
+
 export const objectRepairRules: readonly ObjectRepairRule[] = Object.freeze([
   relationalDefaultRule,
+  nestEditFieldsRule,
 ]);
 
 /**

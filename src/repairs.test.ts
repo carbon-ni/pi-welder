@@ -246,7 +246,7 @@ test("repairArgs applies relational defaults end-to-end", () => {
 });
 
 test("default object repair rules are explicit and immutable", () => {
-  assert.deepEqual(objectRepairRules.map((rule) => rule.action), ["relational-default"]);
+  assert.deepEqual(objectRepairRules.map((rule) => rule.action), ["relational-default", "nest-edit-fields"]);
   assert.equal(Object.isFrozen(objectRepairRules), true);
 });
 
@@ -269,6 +269,62 @@ test("custom object repair rules can extend top-level defaults", () => {
 
   assert.deepEqual(result, { query: "modularity", limit: 10, offset: 1 });
   assert.deepEqual(repairs.map((r) => r.action), ["relational-default", "relational-default"]);
+});
+
+// ─── nest-edit-fields: flat oldText/newText → edits array ───────────────
+
+test("nests flat oldText+newText into edits array for edit tool", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts", oldText: "x", newText: "y" },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] });
+  assert.ok(repairs.some((r) => r.action === "nest-edit-fields"));
+});
+
+test("nests flat old_text+new_text (snake_case) into edits array", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts", old_text: "x", new_text: "y" },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { path: "a.ts", edits: [{ old_text: "x", new_text: "y" }] });
+  assert.ok(repairs.some((r) => r.action === "nest-edit-fields"));
+});
+
+test("nests oldText alone when newText is absent", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts", oldText: "x" },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { path: "a.ts", edits: [{ oldText: "x" }] });
+  assert.ok(repairs.some((r) => r.action === "nest-edit-fields"));
+});
+
+test("does not nest when edits array already present", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] });
+  assert.equal(repairs.length, 0);
+});
+
+test("does not nest flat edit fields for non-edit tools", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts", oldText: "x", newText: "y" },
+    { toolName: "read" },
+  );
+  assert.deepEqual(result, { path: "a.ts", oldText: "x", newText: "y" });
+  assert.equal(repairs.length, 0);
+});
+
+test("does not nest when neither oldText nor old_text present", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts" },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { path: "a.ts" });
+  assert.equal(repairs.length, 0);
 });
 
 // ─── recursion: nested objects and arrays ───────────────────────────────
@@ -413,7 +469,7 @@ test("all repair actions are documented spellings", () => {
     "strip-null", "strip-null-like", "clean-path", "parse-json",
     "wrap-array", "wrap-object-array", "split-string",
     "coerce-boolean", "coerce-number", "strip-extra-props",
-    "relational-default",
+    "relational-default", "nest-edit-fields",
   ];
   const { repairs } = repairArgs({
     path: null, limit: null, target: "none", names: "[\"a\"]",
