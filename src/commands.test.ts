@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseLimitArg, registerWelderCommands, statusSummary } from "./commands.ts";
+import { parseLimitArg, registerWelderCommands, statusSummary, welderCommandSpecs } from "./commands.ts";
 import { createRuntime } from "./runtime.ts";
 
 function ctx(overrides: Partial<any> = {}): any {
@@ -22,23 +22,33 @@ test("parseLimitArg accepts unsigned integers only", () => {
   assert.equal(parseLimitArg("-1"), null);
 });
 
+const expectedCommands = [
+  ["welder-stats", "Show pi-welder repair stats for this session"],
+  ["welder-status", "Show pi-welder runtime status"],
+  ["welder-reset", "Reset pi-welder session stats and pending recovery guidance"],
+  ["welder-on", "Enable pi-welder repairs"],
+  ["welder-off", "Disable pi-welder repairs (analytics still tracked in-memory)"],
+  ["welder-toggle", "Toggle pi-welder repairs on/off"],
+  ["welder-log", "Show the path to this session's welder repair log"],
+  ["welder-guidance", "Show current pi-welder recovery guidance from recent tool failures"],
+  ["welder-failures", "Show pending pi-welder tool failures without recovery hints"],
+  ["welder-guidance-limit", "Set max recent tool failures included in recovery guidance (1-10)"],
+  ["welder-clear", "Clear pending pi-welder recovery guidance"],
+];
+
+test("welderCommandSpecs document command names and descriptions", () => {
+  const runtime = createRuntime();
+  assert.deepEqual(
+    welderCommandSpecs(runtime).map((spec) => [spec.name, spec.description]),
+    expectedCommands,
+  );
+});
+
 test("registerWelderCommands registers all command handlers", () => {
   const commands: Record<string, unknown> = {};
   registerWelderCommands({ registerCommand: (name: string, def: unknown) => { commands[name] = def; } } as any, createRuntime());
 
-  assert.deepEqual(Object.keys(commands), [
-    "welder-stats",
-    "welder-status",
-    "welder-reset",
-    "welder-on",
-    "welder-off",
-    "welder-toggle",
-    "welder-log",
-    "welder-guidance",
-    "welder-failures",
-    "welder-guidance-limit",
-    "welder-clear",
-  ]);
+  assert.deepEqual(Object.keys(commands), expectedCommands.map(([name]) => name));
 });
 
 test("statusSummary renders runtime state and session log path", () => {
