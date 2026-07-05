@@ -329,11 +329,21 @@ export function applyRelationalDefaults(input: Record<string, unknown>): RepairR
 
 /** Repair every field of a tool-call args object. Pure. */
 export function repairArgs(input: Record<string, unknown>): RepairResult {
+  const [result, repairs] = repairObjectFields(input, "input");
+
+  const defaults = applyRelationalDefaults(result);
+  for (const k of Object.keys(defaults.result)) result[k] = defaults.result[k];
+  repairs.push(...defaults.repairs);
+
+  return { result, repairs };
+}
+
+function repairObjectFields(obj: Record<string, unknown>, parentPath: string): [Record<string, unknown>, Repair[]] {
   const result: Record<string, unknown> = {};
   const repairs: Repair[] = [];
 
-  for (const [key, value] of Object.entries(input)) {
-    const fieldPath = `input.${key}`;
+  for (const [key, value] of Object.entries(obj)) {
+    const fieldPath = `${parentPath}.${key}`;
 
     // Content fields: never transformed; null → "" to avoid downstream crashes.
     if (CONTENT_FIELDS.has(key)) {
@@ -358,34 +368,10 @@ export function repairArgs(input: Record<string, unknown>): RepairResult {
     repairs.push(...fieldRepairs);
   }
 
-  const defaults = applyRelationalDefaults(result);
-  for (const k of Object.keys(defaults.result)) result[k] = defaults.result[k];
-  repairs.push(...defaults.repairs);
-
-  return { result, repairs };
+  return [result, repairs];
 }
 
 /** Internal: repair a nested object in place (recursion target). */
 function repairObject(obj: Record<string, unknown>, parentPath: string): [Record<string, unknown>, Repair[]] {
-  const result: Record<string, unknown> = {};
-  const repairs: Repair[] = [];
-  for (const [key, value] of Object.entries(obj)) {
-    const fieldPath = `${parentPath}.${key}`;
-    if (CONTENT_FIELDS.has(key)) {
-      result[key] = value == null ? "" : value;
-      continue;
-    }
-    if (value === null) {
-      repairs.push({ field: fieldPath, action: "strip-null" });
-      continue;
-    }
-    if (isNullLikeString(value)) {
-      repairs.push({ field: fieldPath, action: "strip-null-like" });
-      continue;
-    }
-    const [repaired, fieldRepairs] = repairValue(value, key, fieldPath);
-    result[key] = repaired;
-    repairs.push(...fieldRepairs);
-  }
-  return [result, repairs];
+  return repairObjectFields(obj, parentPath);
 }

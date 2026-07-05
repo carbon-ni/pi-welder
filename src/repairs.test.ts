@@ -231,6 +231,12 @@ test("recurses into nested objects", () => {
   assert.equal((result.config as { strict: boolean }).strict, true);
 });
 
+test("nested content fields keep content-field safety", () => {
+  const { result, repairs } = repairArgs({ payload: { command: null, limit: null } });
+  assert.deepEqual(result, { payload: { command: "" } });
+  assert.deepEqual(repairs.map((r) => r.action), ["strip-null"]);
+});
+
 test("recurses into array items", () => {
   const { result } = repairArgs({
     tasks: [{ count: "3" }],
