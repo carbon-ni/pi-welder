@@ -61,7 +61,7 @@ export function buildToolResultEvent(input: BuildToolResultEventInput): WelderEv
   };
 }
 
-function classifyErrorKind(errorText: string): string {
+export function classifyErrorKind(errorText: string): string {
   const first = errorText.split(/\s|:/)[0]?.trim();
   if (first && /^[A-Z][A-Z0-9_]+$/.test(first)) return first;
   const lower = errorText.toLowerCase();

@@ -13,6 +13,11 @@ export { appendEvent, loadAllEvents, listSessionLogs, pruneOldSessions, readEven
 export { createStats, recordRepairs, recordToolFailure, statsSummary } from "./stats.ts";
 export type { Stats } from "./stats.ts";
 export { aggregateFailures } from "./aggregate.ts";
-export type { FailureCluster, FailureSample, AggregateOptions } from "./aggregate.ts";
+export type { FailureCluster, FailureSample, AggregateOptions, FailureEvent } from "./aggregate.ts";
 export { formatFailureReport } from "./report.ts";
+export {
+  extractPiFailures,
+  loadPiSessionEvents,
+  readPiSessionFile,
+} from "./pi-session-source.ts";
 export type { Repair } from "../repairs/index.ts";

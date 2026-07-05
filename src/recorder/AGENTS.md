@@ -10,10 +10,11 @@ Recorder code should record signals, not full tool content.
 
 - `index.ts`: public facade. Re-export recorder API from here.
 - `stats.ts`: `Stats`, counters, failure counts, and human-readable stats summary.
-- `events.ts`: `WelderEvent` schema and event builders for tool-call/tool-result observations.
+- `events.ts`: `WelderEvent` schema, event builders, and `classifyErrorKind` error classifier.
 - `log.ts`: JSONL log path, append, read, list, load-all, write-failure-report, and session log pruning.
-- `aggregate.ts`: pure `aggregateFailures(events)` — groups failures by `(toolName, errorKind)` into ranked clusters.
+- `aggregate.ts`: pure `aggregateFailures(events)` — groups failures by `(toolName, errorKind)` into ranked clusters. Accepts the minimal `FailureEvent` interface so any source can feed it.
 - `report.ts`: pure `formatFailureReport(clusters)` — markdown rendering of clusters.
+- `pi-session-source.ts`: reads Pi's native session JSONL (`~/.pi/agent/sessions/*/*.jsonl`) and extracts tool failures into `FailureEvent[]`, joining toolResult errors to their toolCall for input keys.
 
 ## Change Placement
 
@@ -22,9 +23,10 @@ Recorder code should record signals, not full tool content.
 - Add file/log persistence behavior in `log.ts`.
 - Add failure-grouping or reduction logic in `aggregate.ts`.
 - Add report formatting (markdown/plain) in `report.ts`.
+- Add parsing of foreign event sources (Pi sessions) in `pi-session-source.ts`.
 - Export new public recorder API through `index.ts`.
 - Handler-level decisions about when to record belong in `../handlers.ts`, not here.
-- Command-level orchestration (load → aggregate → write) belongs in `../commands.ts`.
+- Command-level orchestration (source selection → load → aggregate → write) belongs in `../commands.ts`.
 
 ## Rules
 

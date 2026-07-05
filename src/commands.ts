@@ -1,4 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import * as os from "node:os";
+import * as path from "node:path";
 import { logDir, sessionId } from "./pi-context.ts";
 import {
   buildRecoveryGuidance,
@@ -10,9 +12,11 @@ import {
   aggregateFailures,
   formatFailureReport,
   loadAllEvents,
+  loadPiSessionEvents,
   sessionLogPath,
   statsSummary,
   writeFailureReport,
+  type FailureEvent,
 } from "./recorder/index.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 
@@ -42,46 +46,76 @@ export function statusSummary(ctx: ExtensionContext, runtime: WelderRuntime): st
 
 export interface MineResult {
   reportPath: string;
+  source: MineSource;
   clusters: number;
   totalFailures: number;
   topCluster: string | null;
 }
 
+export type MineSource = "welder" | "pi" | "all";
+
+export const PI_SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
+
+export function parseMineSource(args: string): MineSource {
+  const raw = args.trim().toLowerCase();
+  if (raw === "pi" || raw === "welder" || raw === "all") return raw;
+  return "all";
+}
+
 /**
- * Cross-session failure analysis: load all events, aggregate failures,
- * write a markdown report to the log dir. Pure over injected loaders.
+ * Failure analysis over already-loaded events: aggregate, format, write.
+ * Source selection happens in the caller; this stays pure over events.
  */
 export async function mineFailures(
-  logDirectory: string,
-  deps: {
-    load: (dir: string) => Promise<import("./recorder/index.ts").WelderEvent[]>;
-    write: (dir: string, content: string) => Promise<string>;
-  },
+  events: readonly FailureEvent[],
+  reportDir: string,
+  write: (dir: string, content: string) => Promise<string>,
+  source: MineSource = "all",
 ): Promise<MineResult> {
-  const events = await deps.load(logDirectory);
   const clusters = aggregateFailures(events);
   const report = formatFailureReport(clusters);
-  const reportPath = await deps.write(logDirectory, report);
+  const reportPath = await write(reportDir, report);
   const totalFailures = clusters.reduce((sum, c) => sum + c.count, 0);
   const top = clusters[0];
   return {
     reportPath,
+    source,
     clusters: clusters.length,
     totalFailures,
     topCluster: top ? `${top.toolName} / ${top.errorKind} (×${top.count})` : null,
   };
 }
 
+/** Load events from the chosen source(s). Pure over injected loaders. */
+export async function loadMineEvents(
+  source: MineSource,
+  deps: {
+    welderLogDir: string;
+    piSessionsDir: string;
+    loadWelder: (dir: string) => Promise<FailureEvent[]>;
+    loadPi: (dir: string) => Promise<FailureEvent[]>;
+  },
+): Promise<FailureEvent[]> {
+  if (source === "welder") return deps.loadWelder(deps.welderLogDir);
+  if (source === "pi") return deps.loadPi(deps.piSessionsDir);
+  const [welder, pi] = await Promise.all([
+    deps.loadWelder(deps.welderLogDir).catch(() => []),
+    deps.loadPi(deps.piSessionsDir).catch(() => []),
+  ]);
+  return [...welder, ...pi];
+}
+
 export function mineSummary(result: MineResult): string {
   if (result.clusters === 0) {
-    return `pi-welder: no failures found. Report at ${result.reportPath}`;
+    return `pi-welder: no failures found (source: ${result.source}). Report at ${result.reportPath}`;
   }
   return [
     "pi-welder failure report",
-    `report   : ${result.reportPath}`,
-    `clusters : ${result.clusters}`,
-    `failures : ${result.totalFailures}`,
-    `top      : ${result.topCluster}`,
+    `source    : ${result.source}`,
+    `report    : ${result.reportPath}`,
+    `clusters  : ${result.clusters}`,
+    `failures  : ${result.totalFailures}`,
+    `top       : ${result.topCluster}`,
   ].join("\n");
 }
 
@@ -183,13 +217,17 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
     },
     {
       name: "welder-mine",
-      description: "Aggregate tool failures across sessions into a report",
-      handler: async (_args, ctx) => {
+      description: "Aggregate tool failures across sessions. Args: pi | welder | all (default all)",
+      handler: async (args, ctx) => {
         try {
-          const result = await mineFailures(logDir(ctx), {
-            load: loadAllEvents,
-            write: writeFailureReport,
+          const source = parseMineSource(args);
+          const events = await loadMineEvents(source, {
+            welderLogDir: logDir(ctx),
+            piSessionsDir: PI_SESSIONS_DIR,
+            loadWelder: loadAllEvents,
+            loadPi: loadPiSessionEvents,
           });
+          const result = await mineFailures(events, logDir(ctx), writeFailureReport, source);
           ctx.ui.notify(mineSummary(result), "info");
         } catch (err) {
           ctx.ui.notify(`pi-welder: failed to mine failures: ${String(err)}`, "error");

@@ -29,8 +29,21 @@ export interface AggregateOptions {
 
 const DEFAULT_MAX_SAMPLES = 3;
 
+/**
+ * Minimal event shape the aggregator needs. Both WelderEvent and events
+ * normalized from Pi session logs satisfy this structurally.
+ */
+export interface FailureEvent {
+  toolName: string;
+  wasError?: boolean;
+  errorKind?: string;
+  errorText?: string;
+  inputKeys: string[];
+  ts: string;
+}
+
 export function aggregateFailures(
-  events: readonly WelderEvent[],
+  events: readonly FailureEvent[],
   options: AggregateOptions = {},
 ): FailureCluster[] {
   const maxSamples = options.maxSamples ?? DEFAULT_MAX_SAMPLES;
