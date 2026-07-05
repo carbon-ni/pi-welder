@@ -19,6 +19,7 @@ import {
   buildRecoveryGuidance,
   consumeRecoveryGuidance,
   extractToolErrorText,
+  recoveryFailuresSummary,
   setRecoveryLimit,
   type RecoveryState,
 } from "./recovery.ts";
@@ -190,6 +191,13 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const messages = buildRecoveryGuidance(recovery);
       ctx.ui.notify(messages[0]?.content ?? "pi-welder: no recent tool failures", "info");
+    },
+  });
+
+  pi.registerCommand("welder-failures", {
+    description: "Show pending pi-welder tool failures without recovery hints",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(recoveryFailuresSummary(recovery), "info");
     },
   });
 

@@ -97,6 +97,17 @@ export function buildRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
   return [{ role: "system", content: lines.join("\n") }];
 }
 
+export function recoveryFailuresSummary(state: RecoveryState): string {
+  if (state.failures.length === 0) return "pi-welder: no pending recovery failures";
+
+  const lines = ["pi-welder pending recovery failures"];
+  for (const failure of state.failures) {
+    lines.push(`- ${failure.toolName} failed: ${firstLine(failure.errorText)}`);
+    if (failure.inputKeys.length > 0) lines.push(`  input keys: ${failure.inputKeys.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
 export function consumeRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
   const snapshot = recoverySnapshot(state);
   if (!snapshot || snapshot === state.deliveredSnapshot) return [];

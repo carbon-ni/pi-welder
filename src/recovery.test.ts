@@ -8,6 +8,7 @@ import {
   createRecoveryState,
   extractToolErrorText,
   recordToolResult,
+  recoveryFailuresSummary,
   setRecoveryLimit,
 } from "./recovery.ts";
 
@@ -131,4 +132,21 @@ test("setRecoveryLimit rejects unsafe limits", () => {
   assert.throws(() => setRecoveryLimit(state, 0), /between 1 and 10/);
   assert.throws(() => setRecoveryLimit(state, 11), /between 1 and 10/);
   assert.throws(() => setRecoveryLimit(state, 1.5), /integer/);
+});
+
+test("recoveryFailuresSummary renders pending failures", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, { toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT: no such file\nmore" });
+  recordToolResult(state, { toolName: "edit", input: { path: "a.ts", oldText: "x" }, isError: true, content: "EDIT_MISMATCH" });
+
+  const summary = recoveryFailuresSummary(state);
+
+  assert.match(summary, /pending recovery failures/);
+  assert.match(summary, /read failed: ENOENT/);
+  assert.match(summary, /input keys: path/);
+  assert.match(summary, /edit failed: EDIT_MISMATCH/);
+});
+
+test("recoveryFailuresSummary handles empty state", () => {
+  assert.equal(recoveryFailuresSummary(createRecoveryState()), "pi-welder: no pending recovery failures");
 });
