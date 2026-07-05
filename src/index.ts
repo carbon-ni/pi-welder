@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
     if (!input || typeof input !== "object") return undefined;
     stats.totalToolCalls++;
 
-    const { result, repairs } = repairArgs(input);
+    const { result, repairs } = repairArgs(input, { toolName: event.toolName });
 
     // In-memory stats always track the signal, even when repairs are off.
     if (repairs.length > 0) recordRepairs(stats, repairs);

@@ -155,16 +155,22 @@ function isNumberField(key: string): boolean {
 
 // ─── Per-value repair dispatch ──────────────────────────────────────────
 
-interface RepairContext {
+export interface RepairContext {
   key: string;
   fieldPath: string;
   parsedFromString: boolean;
+  toolName?: string;
 }
 
-interface RuleResult {
+export interface RuleResult {
   value: unknown;
   repairs: Repair[];
   parsedFromString?: boolean;
+}
+
+export interface RepairOptions {
+  toolName?: string;
+  rules?: readonly RepairRule[];
 }
 
 export interface RepairRule {
@@ -250,11 +256,11 @@ export const repairRules: RepairRule[] = [
  * Apply ordered structural repairs to a single field value.
  * Registry order is the extension point: parse-json → array-shape matters.
  */
-function repairValue(value: unknown, key: string, fieldPath: string): [unknown, Repair[]] {
+function repairValue(value: unknown, key: string, fieldPath: string, options: RepairOptions): [unknown, Repair[]] {
   const repairs: Repair[] = [];
-  const ctx: RepairContext = { key, fieldPath, parsedFromString: false };
+  const ctx: RepairContext = { key, fieldPath, parsedFromString: false, toolName: options.toolName };
 
-  for (const rule of repairRules) {
+  for (const rule of options.rules ?? repairRules) {
     const result = rule.repair(value, ctx);
     value = result.value;
     repairs.push(...result.repairs);
@@ -264,13 +270,13 @@ function repairValue(value: unknown, key: string, fieldPath: string): [unknown, 
   if (Array.isArray(value)) {
     const items: unknown[] = [];
     for (let i = 0; i < value.length; i++) {
-      const [repaired, itemRepairs] = repairValue(value[i], "[item]", `${fieldPath}[${i}]`);
+      const [repaired, itemRepairs] = repairValue(value[i], "[item]", `${fieldPath}[${i}]`, options);
       items.push(repaired);
       repairs.push(...itemRepairs);
     }
     value = items;
   } else if (typeof value === "object" && value !== null) {
-    const [repairedObj, nested] = repairObject(value as Record<string, unknown>, fieldPath);
+    const [repairedObj, nested] = repairObject(value as Record<string, unknown>, fieldPath, options);
     value = repairedObj;
     repairs.push(...nested);
   }
@@ -328,8 +334,8 @@ export function applyRelationalDefaults(input: Record<string, unknown>): RepairR
 // ─── Top-level entry: repair all fields of an args object ───────────────
 
 /** Repair every field of a tool-call args object. Pure. */
-export function repairArgs(input: Record<string, unknown>): RepairResult {
-  const [result, repairs] = repairObjectFields(input, "input");
+export function repairArgs(input: Record<string, unknown>, options: RepairOptions = {}): RepairResult {
+  const [result, repairs] = repairObjectFields(input, "input", options);
 
   const defaults = applyRelationalDefaults(result);
   for (const k of Object.keys(defaults.result)) result[k] = defaults.result[k];
@@ -338,7 +344,11 @@ export function repairArgs(input: Record<string, unknown>): RepairResult {
   return { result, repairs };
 }
 
-function repairObjectFields(obj: Record<string, unknown>, parentPath: string): [Record<string, unknown>, Repair[]] {
+function repairObjectFields(
+  obj: Record<string, unknown>,
+  parentPath: string,
+  options: RepairOptions,
+): [Record<string, unknown>, Repair[]] {
   const result: Record<string, unknown> = {};
   const repairs: Repair[] = [];
 
@@ -363,7 +373,7 @@ function repairObjectFields(obj: Record<string, unknown>, parentPath: string): [
       continue;
     }
 
-    const [repaired, fieldRepairs] = repairValue(value, key, fieldPath);
+    const [repaired, fieldRepairs] = repairValue(value, key, fieldPath, options);
     result[key] = repaired;
     repairs.push(...fieldRepairs);
   }
@@ -372,6 +382,10 @@ function repairObjectFields(obj: Record<string, unknown>, parentPath: string): [
 }
 
 /** Internal: repair a nested object in place (recursion target). */
-function repairObject(obj: Record<string, unknown>, parentPath: string): [Record<string, unknown>, Repair[]] {
-  return repairObjectFields(obj, parentPath);
+function repairObject(
+  obj: Record<string, unknown>,
+  parentPath: string,
+  options: RepairOptions,
+): [Record<string, unknown>, Repair[]] {
+  return repairObjectFields(obj, parentPath, options);
 }

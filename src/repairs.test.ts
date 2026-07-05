@@ -12,6 +12,7 @@ import {
   applyRelationalDefaults,
   repairRules,
   type RepairAction,
+  type RepairRule,
 } from "./repairs.ts";
 
 const noRepairs = (input: Record<string, unknown>) => repairArgs(input).repairs;
@@ -306,6 +307,26 @@ test("repair rule order is explicit", () => {
     "coerce-number",
     "strip-extra-props",
   ]);
+});
+
+test("repair rules receive tool context for tool-specific fixes", () => {
+  const uppercaseTargetForSearch: RepairRule = {
+    action: "clean-path",
+    repair(value, ctx) {
+      if (ctx.toolName !== "search" || ctx.key !== "target" || typeof value !== "string") {
+        return { value, repairs: [] };
+      }
+      return { value: value.toUpperCase(), repairs: [{ field: ctx.fieldPath, action: "clean-path" }] };
+    },
+  };
+
+  const { result, repairs } = repairArgs(
+    { target: "abc" },
+    { toolName: "search", rules: [uppercaseTargetForSearch] },
+  );
+
+  assert.deepEqual(result, { target: "ABC" });
+  assert.deepEqual(repairs, [{ field: "input.target", action: "clean-path" }]);
 });
 
 test("all repair actions are documented spellings", () => {
