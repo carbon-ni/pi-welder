@@ -6,7 +6,7 @@
  * runs. Repairs are transparent and content fields are never touched.
  * Every repair is logged to `.pi/welder-log/<sessionId>.jsonl`.
  *
- * Commands: /welder-stats · /welder-status · /welder-on · /welder-off · /welder-toggle · /welder-log
+ * Commands: /welder-stats · /welder-status · /welder-reset · /welder-on · /welder-off · /welder-toggle · /welder-log
  */
 
 import * as path from "node:path";
@@ -61,6 +61,12 @@ function statusSummary(ctx: ExtensionContext): string {
     `failed results   : ${stats.failedToolResults}`,
     `log file         : ${sessionLogPath(logDir(ctx), sessionId(ctx))}`,
   ].join("\n");
+}
+
+function resetSessionState(): void {
+  const maxFailures = recovery.maxFailures;
+  stats = createStats();
+  recovery = createRecoveryState(maxFailures);
 }
 
 // Session-scoped state. Reset on every session_start.
@@ -150,6 +156,15 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("welder-status", {
     description: "Show pi-welder runtime status",
     handler: async (_args, ctx) => { ctx.ui.notify(statusSummary(ctx), "info"); },
+  });
+
+  pi.registerCommand("welder-reset", {
+    description: "Reset pi-welder session stats and pending recovery guidance",
+    handler: async (_args, ctx) => {
+      resetSessionState();
+      stats.sessionId = sessionId(ctx);
+      ctx.ui.notify("pi-welder: reset session stats and recovery state", "info");
+    },
   });
 
   pi.registerCommand("welder-on", {
