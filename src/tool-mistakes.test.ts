@@ -65,23 +65,32 @@ test("collectToolResultMistake: records harness-side tool result errors", () => 
   assert.equal(mistake?.pattern, "tool_result_error");
 });
 
-test("recordMistake: appends immutable records with model metadata", () => {
+test("recordMistake: appends immutable records with model and repair metadata", () => {
   const now = () => "2026-07-05T10:00:00.000Z";
   const log = emptyTelemetry();
   const [draft] = collectToolCallMistakes({ toolName: "read", input: "/tmp/a" });
-  const next = recordMistake(log, { ...draft!, toolCallId: "c1", cwd: "/repo", modelId: "glm-5" }, now);
+  const next = recordMistake(log, {
+    ...draft!,
+    toolCallId: "c1",
+    cwd: "/repo",
+    modelId: "glm-5",
+    repaired: true,
+    repairRules: ["wrapRootStringAsObject"],
+  }, now);
   assert.equal(log.records.length, 0);
   assert.equal(next.records[0]?.id, 1);
   assert.equal(next.records[0]?.modelId, "glm-5");
+  assert.equal(next.records[0]?.repaired, true);
+  assert.deepEqual(next.records[0]?.repairRules, ["wrapRootStringAsObject"]);
   assert.equal(next.nextId, 2);
 });
 
-test("summarizeTelemetry: groups hotspots by model/tool/pattern", () => {
+test("summarizeTelemetry: groups hotspots by model/tool/pattern with repair counts", () => {
   const now = () => "2026-07-05T10:00:00.000Z";
   let telemetry = emptyTelemetry();
-  telemetry = recordMistake(telemetry, { kind: "syntax", phase: "tool_call", pattern: "bare_string_root", toolName: "read", toolCallId: "c1", cwd: "/", input: "/a", modelId: "glm" }, now);
-  telemetry = recordMistake(telemetry, { kind: "syntax", phase: "tool_call", pattern: "bare_string_root", toolName: "read", toolCallId: "c2", cwd: "/", input: "/b", modelId: "glm" }, now);
+  telemetry = recordMistake(telemetry, { kind: "syntax", phase: "tool_call", pattern: "bare_string_root", toolName: "read", toolCallId: "c1", cwd: "/", input: "/a", modelId: "glm", repaired: true, repairRules: ["wrapRootStringAsObject"] }, now);
+  telemetry = recordMistake(telemetry, { kind: "syntax", phase: "tool_call", pattern: "bare_string_root", toolName: "read", toolCallId: "c2", cwd: "/", input: "/b", modelId: "glm", repaired: false }, now);
   const summary = summarizeTelemetry(telemetry);
   assert.match(summary, /2 model tool-call mistakes/);
-  assert.match(summary, /glm read bare_string_root: 2/);
+  assert.match(summary, /glm read bare_string_root: 2 \(repaired 1\)/);
 });

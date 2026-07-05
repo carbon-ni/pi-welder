@@ -2,8 +2,8 @@
 
 A pi extension for **model tool-call mistake telemetry**.
 
-The goal is to understand where models make tool-call mistakes most often, so we
-can later add targeted repair rules. Logging/persistence is only the collection
+The goal is to understand where models make tool-call mistakes most often, then
+repair the most common safe patterns. Logging/persistence is only the collection
 mechanism, not the product goal.
 
 Inspired by [`pi-tool-repair`](https://github.com/monotykamary/pi-tool-repair):
@@ -31,6 +31,8 @@ src/
   tool-mistakes.test.ts   node:test suite for model mistake patterns
   failure-log.ts          legacy harness failure view (kept for compatibility)
   failure-log.test.ts     legacy tests
+  tool-repair.ts          pure conservative repair rules
+  tool-repair.test.ts     repair-rule tests
   index.ts                pi wiring: tool_call + tool_result hooks, /mistakes + /failures
 .pi/extensions/welder.ts  thin re-export so `pi` auto-loads it in this project
 ```
@@ -62,6 +64,8 @@ Per mistake:
   field?,
   receivedField?,
   errorContent?,
+  repaired?,
+  repairRules?,
 }
 ```
 
@@ -74,10 +78,26 @@ view fully replaces it.
 
 ## View
 
-- `/mistakes` — hotspot summary grouped by `model tool pattern`
+- `/mistakes` — hotspot summary grouped by `model tool pattern`, including repaired counts
 - `/failures` — legacy harness-failure summary
 
-## Next repair direction
+## Repair mode
 
-Once telemetry shows a recurring hotspot, add a targeted repair rule in the style
-of `pi-tool-repair`: validate first, repair only the failed path, then revalidate.
+Default mode is observe-only. To enable conservative repairs:
+
+```bash
+WELDER_REPAIR_MODE=repair pi -e ./.pi/extensions/welder.ts
+```
+
+Current repairs are schema-scoped and deterministic:
+
+1. `wrapRootStringAsObject`
+2. `renameAliasedField`
+3. `dropNullOptional`
+4. `dropEmptyObjectPlaceholder`
+5. `parseJsonStringifiedArray`
+6. `wrapBareStringAsArray`
+
+Repairs only run for known built-in tool schemas, do not mutate original input
+inside the pure repair function, and are applied only when the repaired input
+validates against the known schema.

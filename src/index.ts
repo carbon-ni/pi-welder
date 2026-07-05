@@ -30,9 +30,16 @@ import {
   type ToolMistakeTelemetry,
   type ToolResultInput as MistakeToolResultInput,
 } from "./tool-mistakes.ts";
+import { repairToolCallInput } from "./tool-repair.ts";
 
 const FAILURE_STATE_KEY = "welder-failures";
 const TELEMETRY_STATE_KEY = "welder-tool-mistakes";
+
+type RepairMode = "observe" | "repair";
+
+function repairMode(): RepairMode {
+  return process.env.WELDER_REPAIR_MODE === "repair" ? "repair" : "observe";
+}
 
 export default function welder(pi: ExtensionAPI) {
   let failureLog: FailureLog = emptyLog();
@@ -91,16 +98,35 @@ export default function welder(pi: ExtensionAPI) {
     });
     if (drafts.length === 0) return;
 
+    const repair = repairMode() === "repair"
+      ? repairToolCallInput({
+        toolName: event.toolName,
+        input: (event as { input?: unknown }).input,
+      })
+      : undefined;
+
     for (const draft of drafts) {
       telemetry = recordMistake(telemetry, {
         ...draft,
         toolCallId: event.toolCallId,
         cwd: ctx.cwd,
         modelId: modelId(ctx),
+        repaired: repair?.changed ?? false,
+        repairRules: repair?.rulesFired,
       });
     }
 
     persistTelemetry(pi);
+
+    if (repair?.changed) {
+      (event as { input?: unknown }).input = repair.input;
+      ctx.ui.notify(
+        `repaired ${event.toolName} with ${repair.rulesFired.join(", ")}`,
+        "info",
+      );
+      return;
+    }
+
     ctx.ui.notify(`recorded ${drafts.length} tool-call mistake(s) for ${event.toolName}`, "info");
   });
 

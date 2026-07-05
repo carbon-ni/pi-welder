@@ -25,6 +25,8 @@ export interface MistakeDraft {
   field?: string;
   receivedField?: string;
   errorContent?: string;
+  repaired?: boolean;
+  repairRules?: string[];
 }
 
 export interface ToolMistake extends MistakeDraft {
@@ -52,15 +54,15 @@ export interface ToolResultInput {
   content: Array<{ type: string; text?: string }>;
 }
 
-interface SchemaField {
+export interface SchemaField {
   type: "string" | "number" | "boolean" | "array" | "object";
   required?: boolean;
   aliases?: string[];
 }
 
-type ToolSchema = Record<string, SchemaField>;
+export type ToolSchema = Record<string, SchemaField>;
 
-const BUILTIN_SCHEMAS: Record<string, ToolSchema> = {
+export const BUILTIN_SCHEMAS: Record<string, ToolSchema> = {
   read: {
     path: { type: "string", required: true, aliases: ["absolutePath", "file_path", "filePath", "filepath", "pathname", "target_file", "targetFile", "file", "absolute_path", "fileAbsolutePath"] },
     offset: { type: "number" },
@@ -92,7 +94,7 @@ const BUILTIN_SCHEMAS: Record<string, ToolSchema> = {
   },
 };
 
-const STRING_ROOT_FIELD: Record<string, string> = {
+export const STRING_ROOT_FIELD: Record<string, string> = {
   bash: "command",
   find: "pattern",
   grep: "pattern",
@@ -194,14 +196,18 @@ export function recordMistake(
 
 export function summarizeTelemetry(telemetry: ToolMistakeTelemetry): string {
   if (telemetry.records.length === 0) return "No model tool-call mistakes recorded.";
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { total: number; repaired: number }>();
   for (const record of telemetry.records) {
     const key = `${record.modelId ?? "unknown-model"} ${record.toolName} ${record.pattern}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const current = counts.get(key) ?? { total: 0, repaired: 0 };
+    counts.set(key, {
+      total: current.total + 1,
+      repaired: current.repaired + (record.repaired ? 1 : 0),
+    });
   }
   const lines = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([key, count]) => `${key}: ${count}`);
+    .sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0]))
+    .map(([key, count]) => `${key}: ${count.total}${count.repaired > 0 ? ` (repaired ${count.repaired})` : ""}`);
   return [`${telemetry.records.length} model tool-call mistakes:`, ...lines].join("\n");
 }
 
