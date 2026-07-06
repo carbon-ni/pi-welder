@@ -246,7 +246,7 @@ test("repairArgs applies relational defaults end-to-end", () => {
 });
 
 test("default object repair rules are explicit and immutable", () => {
-  assert.deepEqual(objectRepairRules.map((rule) => rule.action), ["relational-default", "nest-edit-fields"]);
+  assert.deepEqual(objectRepairRules.map((rule) => rule.action), ["rename-aliased-field", "relational-default", "nest-edit-fields"]);
   assert.equal(Object.isFrozen(objectRepairRules), true);
 });
 
@@ -269,6 +269,34 @@ test("custom object repair rules can extend top-level defaults", () => {
 
   assert.deepEqual(result, { query: "modularity", limit: 10, offset: 1 });
   assert.deepEqual(repairs.map((r) => r.action), ["relational-default", "relational-default"]);
+});
+
+// ─── schema-aware repair: validate first, repair, revalidate ─────────────
+
+test("schema-aware repair renames aliases for known tools", () => {
+  const { result, repairs } = repairArgs(
+    { file_path: "src/index.ts" },
+    { toolName: "read" },
+  );
+
+  assert.deepEqual(result, { path: "src/index.ts" });
+  assert.deepEqual(repairs.map((r) => r.action), ["rename-aliased-field"]);
+});
+
+test("schema-aware repair leaves valid known-tool input untouched", () => {
+  const input = { path: "src/index.ts", limit: 10 };
+  const { result, repairs } = repairArgs(input, { toolName: "read" });
+
+  assert.equal(result, input);
+  assert.equal(repairs.length, 0);
+});
+
+test("schema-aware repair does not apply partial repairs that still fail validation", () => {
+  const input = { file_path: "src/index.ts", limit: "many" };
+  const { result, repairs } = repairArgs(input, { toolName: "read" });
+
+  assert.equal(result, input);
+  assert.equal(repairs.length, 0);
 });
 
 // ─── nest-edit-fields: flat oldText/newText → edits array ───────────────
@@ -469,7 +497,7 @@ test("all repair actions are documented spellings", () => {
     "strip-null", "strip-null-like", "clean-path", "parse-json",
     "wrap-array", "wrap-object-array", "split-string",
     "coerce-boolean", "coerce-number", "strip-extra-props",
-    "relational-default", "nest-edit-fields",
+    "rename-aliased-field", "relational-default", "nest-edit-fields",
   ];
   const { repairs } = repairArgs({
     path: null, limit: null, target: "none", names: "[\"a\"]",

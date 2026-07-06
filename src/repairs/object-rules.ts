@@ -1,8 +1,31 @@
+import { FIELD_ALIASES } from "../schemas.ts";
 import type { ObjectRepairRule, Repair, RepairResult } from "./types.ts";
 
 /** Flat edit-field spellings the model emits at top level instead of in `edits`. */
 const OLD_TEXT_KEYS = ["oldText", "old_text"] as const;
 const NEW_TEXT_KEYS = ["newText", "new_text"] as const;
+
+const renameAliasedFieldRule: ObjectRepairRule = {
+  action: "rename-aliased-field",
+  repair(input, ctx) {
+    if (!ctx.toolName) return { result: input, repairs: [] };
+    const aliases = FIELD_ALIASES.get(ctx.toolName);
+    if (!aliases) return { result: input, repairs: [] };
+
+    const result = { ...input };
+    const repairs: Repair[] = [];
+    for (const [canonical, aliasList] of aliases.entries()) {
+      if (canonical in result) continue;
+      const alias = aliasList.find((candidate) => candidate in result && result[candidate] != null);
+      if (!alias) continue;
+      result[canonical] = result[alias];
+      delete result[alias];
+      repairs.push({ field: `${ctx.parentPath}.${canonical}`, action: "rename-aliased-field" });
+    }
+
+    return repairs.length > 0 ? { result, repairs } : { result: input, repairs: [] };
+  },
+};
 
 const relationalDefaultRule: ObjectRepairRule = {
   action: "relational-default",
@@ -52,6 +75,7 @@ const nestEditFieldsRule: ObjectRepairRule = {
 };
 
 export const objectRepairRules: readonly ObjectRepairRule[] = Object.freeze([
+  renameAliasedFieldRule,
   relationalDefaultRule,
   nestEditFieldsRule,
 ]);

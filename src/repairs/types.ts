@@ -9,6 +9,7 @@ export type RepairAction =
   | "coerce-boolean"
   | "coerce-number"
   | "strip-extra-props"
+  | "rename-aliased-field"
   | "relational-default"
   | "nest-edit-fields";
 

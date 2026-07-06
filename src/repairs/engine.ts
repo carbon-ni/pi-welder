@@ -1,4 +1,5 @@
 import { CONTENT_FIELDS } from "../fields.ts";
+import { hasSchemaRepairSignal, hasUnknownSchemaField, schemaForTool, validateAgainstSchema } from "../schemas.ts";
 import { isNullLikeString } from "./helpers.ts";
 import { objectRepairRules } from "./object-rules.ts";
 import { repairRules } from "./rules.ts";
@@ -14,11 +15,26 @@ import type {
 /** Repair every field of a tool-call args object. Pure. */
 export function repairArgs(input: Record<string, unknown>, options: RepairOptions = {}): RepairResult {
   const resolvedOptions = resolveRepairOptions(options);
+  const schema = schemaForTool(resolvedOptions.toolName);
+
+  if (
+    schema &&
+    validateAgainstSchema(input, schema).length === 0 &&
+    !hasSchemaRepairSignal(resolvedOptions.toolName, input) &&
+    !hasUnknownSchemaField(input, schema)
+  ) {
+    return { result: input, repairs: [] };
+  }
+
   let [result, repairs] = repairObjectFields(input, "input", resolvedOptions);
 
   const objectResult = repairTopLevelObject(result, resolvedOptions);
   result = objectResult.result;
   repairs = [...repairs, ...objectResult.repairs];
+
+  if (schema && validateAgainstSchema(result, schema).length > 0) {
+    return { result: input, repairs: [] };
+  }
 
   return { result, repairs };
 }
