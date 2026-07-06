@@ -1,5 +1,5 @@
 import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { repairArgs, type Repair } from "./repairs/index.ts";
+import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -12,6 +12,7 @@ import {
   pruneOldSessions,
   recordRepairs,
   recordToolFailure,
+  recordValidation,
 } from "./recorder/index.ts";
 import { logDir, modelMeta, sessionId } from "./pi-context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
@@ -21,6 +22,7 @@ export const DEFAULT_SESSION_RETENTION = 50;
 interface ToolInputRepair {
   result: Record<string, unknown>;
   repairs: Repair[];
+  validation?: RepairValidation;
 }
 
 export async function handleSessionStart(
@@ -66,6 +68,7 @@ export function repairToolInput(
   const repair = repairArgs(input, { toolName });
 
   // In-memory stats always track the signal, even when repairs are off.
+  recordValidation(runtime.stats, repair.validation);
   if (repair.repairs.length > 0) recordRepairs(runtime.stats, repair.repairs);
   return repair;
 }

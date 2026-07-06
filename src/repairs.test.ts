@@ -285,18 +285,20 @@ test("schema-aware repair renames aliases for known tools", () => {
 
 test("schema-aware repair leaves valid known-tool input untouched", () => {
   const input = { path: "src/index.ts", limit: 10 };
-  const { result, repairs } = repairArgs(input, { toolName: "read" });
+  const { result, repairs, validation } = repairArgs(input, { toolName: "read" });
 
   assert.equal(result, input);
   assert.equal(repairs.length, 0);
+  assert.deepEqual(validation, { checked: true, passed: true, rejected: false });
 });
 
 test("schema-aware repair does not apply partial repairs that still fail validation", () => {
   const input = { file_path: "src/index.ts", limit: "many" };
-  const { result, repairs } = repairArgs(input, { toolName: "read" });
+  const { result, repairs, validation } = repairArgs(input, { toolName: "read" });
 
   assert.equal(result, input);
   assert.equal(repairs.length, 0);
+  assert.deepEqual(validation, { checked: true, passed: false, rejected: true });
 });
 
 // ─── nest-edit-fields: flat oldText/newText → edits array ───────────────

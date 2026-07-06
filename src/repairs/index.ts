@@ -31,5 +31,6 @@ export type {
   RepairOptions,
   RepairResult,
   RepairRule,
+  RepairValidation,
   RuleResult,
 } from "./types.ts";

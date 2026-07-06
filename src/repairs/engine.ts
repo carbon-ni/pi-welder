@@ -8,6 +8,7 @@ import type {
   Repair,
   RepairOptions,
   RepairResult,
+  RepairValidation,
   ResolvedRepairOptions,
   RepairContext,
 } from "./types.ts";
@@ -17,13 +18,16 @@ export function repairArgs(input: Record<string, unknown>, options: RepairOption
   const resolvedOptions = resolveRepairOptions(options);
   const schema = schemaForTool(resolvedOptions.toolName);
 
+  const preValidationIssues = schema ? validateAgainstSchema(input, schema) : [];
+  const validation = schema ? validationResult(preValidationIssues.length === 0, false) : undefined;
+
   if (
     schema &&
-    validateAgainstSchema(input, schema).length === 0 &&
+    preValidationIssues.length === 0 &&
     !hasSchemaRepairSignal(resolvedOptions.toolName, input) &&
     !hasUnknownSchemaField(input, schema)
   ) {
-    return { result: input, repairs: [] };
+    return { result: input, repairs: [], validation };
   }
 
   let [result, repairs] = repairObjectFields(input, "input", resolvedOptions);
@@ -33,10 +37,10 @@ export function repairArgs(input: Record<string, unknown>, options: RepairOption
   repairs = [...repairs, ...objectResult.repairs];
 
   if (schema && validateAgainstSchema(result, schema).length > 0) {
-    return { result: input, repairs: [] };
+    return { result: input, repairs: [], validation: validationResult(false, true) };
   }
 
-  return { result, repairs };
+  return { result, repairs, validation };
 }
 
 function resolveRepairOptions(options: RepairOptions): ResolvedRepairOptions {
@@ -45,6 +49,10 @@ function resolveRepairOptions(options: RepairOptions): ResolvedRepairOptions {
     rules: options.rules ?? [...repairRules, ...(options.extraRules ?? [])],
     objectRules: options.objectRules ?? [...(options.extraObjectRules ?? []), ...objectRepairRules],
   };
+}
+
+function validationResult(passed: boolean, rejected: boolean): RepairValidation {
+  return { checked: true, passed, rejected };
 }
 
 function repairTopLevelObject(input: Record<string, unknown>, options: ResolvedRepairOptions): ObjectRuleResult {

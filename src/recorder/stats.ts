@@ -1,9 +1,13 @@
-import type { Repair } from "../repairs/index.ts";
+import type { Repair, RepairValidation } from "../repairs/index.ts";
 
 export interface Stats {
   totalToolCalls: number;
   repairedToolCalls: number;
   failedToolResults: number;
+  validationChecks: number;
+  validationsPassed: number;
+  validationsFailed: number;
+  validationRejectedRepairs: number;
   failuresByTool: Map<string, number>;
   repairsByAction: Map<string, number>;
   sessionId: string | null;
@@ -15,6 +19,10 @@ export function createStats(): Stats {
     totalToolCalls: 0,
     repairedToolCalls: 0,
     failedToolResults: 0,
+    validationChecks: 0,
+    validationsPassed: 0,
+    validationsFailed: 0,
+    validationRejectedRepairs: 0,
     failuresByTool: new Map(),
     repairsByAction: new Map(),
     sessionId: null,
@@ -28,6 +36,14 @@ export function recordRepairs(stats: Stats, repairs: Repair[]): void {
   for (const r of repairs) {
     stats.repairsByAction.set(r.action, (stats.repairsByAction.get(r.action) ?? 0) + 1);
   }
+}
+
+export function recordValidation(stats: Stats, validation: RepairValidation | undefined): void {
+  if (!validation?.checked) return;
+  stats.validationChecks += 1;
+  if (validation.passed) stats.validationsPassed += 1;
+  else stats.validationsFailed += 1;
+  if (validation.rejected) stats.validationRejectedRepairs += 1;
 }
 
 export function recordToolFailure(stats: Stats, toolName: string): void {
@@ -45,6 +61,12 @@ export function statsSummary(stats: Stats): string {
   lines.push(`tool calls seen : ${total}`);
   lines.push(`calls repaired  : ${repaired}${total ? ` (${Math.round((repaired / total) * 100)}%)` : ""}`);
   lines.push(`repairs applied : ${totalRepairs}`);
+  lines.push(`validations    : ${stats.validationChecks}`);
+  if (stats.validationChecks > 0) {
+    lines.push(`  passed       : ${stats.validationsPassed}`);
+    lines.push(`  failed       : ${stats.validationsFailed}`);
+    lines.push(`  rejected     : ${stats.validationRejectedRepairs}`);
+  }
   lines.push(`failed results : ${stats.failedToolResults}`);
 
   if (stats.repairsByAction.size > 0) {

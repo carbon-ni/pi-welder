@@ -8,6 +8,7 @@ import {
   createStats,
   recordRepairs,
   recordToolFailure,
+  recordValidation,
   buildEvent,
   buildToolResultEvent,
   appendEvent,
@@ -29,6 +30,10 @@ test("createStats starts empty", () => {
   assert.equal(s.totalToolCalls, 0);
   assert.equal(s.repairedToolCalls, 0);
   assert.equal(s.failedToolResults, 0);
+  assert.equal(s.validationChecks, 0);
+  assert.equal(s.validationsPassed, 0);
+  assert.equal(s.validationsFailed, 0);
+  assert.equal(s.validationRejectedRepairs, 0);
   assert.equal(s.failuresByTool.size, 0);
   assert.equal(s.repairsByAction.size, 0);
 });
@@ -51,6 +56,18 @@ test("recordRepairs with no repairs does not mark the call repaired", () => {
   const s = createStats();
   recordRepairs(s, []);
   assert.equal(s.repairedToolCalls, 0);
+});
+
+test("recordValidation counts validation outcomes", () => {
+  const s = createStats();
+  recordValidation(s, { checked: true, passed: true, rejected: false });
+  recordValidation(s, { checked: true, passed: false, rejected: true });
+  recordValidation(s, undefined);
+
+  assert.equal(s.validationChecks, 2);
+  assert.equal(s.validationsPassed, 1);
+  assert.equal(s.validationsFailed, 1);
+  assert.equal(s.validationRejectedRepairs, 1);
 });
 
 test("recordToolFailure counts failed tool results by tool", () => {
@@ -224,6 +241,18 @@ test("statsSummary renders counts and percentages", () => {
   assert.match(out, /wrap-array.*1/);
   assert.match(out, /repairs applied : 3/);
   assert.match(out, /tool calls seen : 10/);
+});
+
+test("statsSummary renders validations", () => {
+  const s = createStats();
+  recordValidation(s, { checked: true, passed: true, rejected: false });
+  recordValidation(s, { checked: true, passed: false, rejected: true });
+
+  const out = statsSummary(s);
+  assert.match(out, /validations    : 2/);
+  assert.match(out, /passed       : 1/);
+  assert.match(out, /failed       : 1/);
+  assert.match(out, /rejected     : 1/);
 });
 
 test("statsSummary renders failed tool results", () => {

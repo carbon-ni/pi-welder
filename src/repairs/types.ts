@@ -18,9 +18,16 @@ export interface Repair {
   action: RepairAction;
 }
 
+export interface RepairValidation {
+  checked: boolean;
+  passed: boolean;
+  rejected: boolean;
+}
+
 export interface RepairResult {
   result: Record<string, unknown>;
   repairs: Repair[];
+  validation?: RepairValidation;
 }
 
 export interface RepairContext {
