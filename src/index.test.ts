@@ -43,7 +43,7 @@ test("factory registers tool_call/tool_result/context + session handlers and all
   assert.ok(c.handlers["tool_result"], "tool_result handler registered");
   assert.ok(c.handlers["context"], "context handler registered");
   assert.ok(c.handlers["session_start"], "session_start handler registered");
-  for (const cmd of ["welder-stats", "welder-status", "welder-reset", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance", "welder-failures", "welder-guidance-limit", "welder-clear"]) {
+  for (const cmd of ["welder-stats", "welder-reset", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance", "welder-failures", "welder-guidance-limit", "welder-clear"]) {
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
 });
@@ -133,27 +133,6 @@ test("welder-stats surfaces repairs counted in-session", async () => {
   assert.match(shown, /strip-null/);
 });
 
-test("welder-status summarizes runtime state", async () => {
-  const c = loadExtension();
-  let shown = "";
-  const cx = ctx({
-    cwd: "/workspace/project",
-    sessionId: "status-session",
-    ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} },
-  });
-  await c.handlers["session_start"]!({}, cx);
-  await c.commands["welder-off"]!.handler("", cx);
-  await c.commands["welder-guidance-limit"]!.handler("2", cx);
-  await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: true, content: "ENOENT" }, cx);
-
-  await c.commands["welder-status"]!.handler("", cx);
-
-  assert.match(shown, /enabled\s+: false/);
-  assert.match(shown, /guidance limit\s+: 2/);
-  assert.match(shown, /pending failures\s+: 1/);
-  assert.match(shown, /status-session\.jsonl/);
-});
-
 test("welder-reset clears stats and recovery without changing enabled state", async () => {
   const c = loadExtension();
   let shown = "";
@@ -164,10 +143,9 @@ test("welder-reset clears stats and recovery without changing enabled state", as
   await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: true, content: "ENOENT" }, cx);
 
   await c.commands["welder-reset"]!.handler("", cx);
-  await c.commands["welder-status"]!.handler("", cx);
+  await c.commands["welder-stats"]!.handler("", cx);
 
-  assert.match(shown, /enabled\s+: false/);
-  assert.match(shown, /pending failures\s+: 0/);
+  assert.match(shown, /calls repaired\s+: 0/);
   assert.match(shown, /tool calls seen\s+: 0/);
   assert.match(shown, /failed results\s+: 0/);
 });

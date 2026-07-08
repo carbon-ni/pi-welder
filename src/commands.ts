@@ -32,18 +32,6 @@ export function parseLimitArg(args: string): number | null {
   return Number(raw);
 }
 
-export function statusSummary(ctx: ExtensionContext, runtime: WelderRuntime): string {
-  return [
-    "pi-welder status",
-    `enabled          : ${runtime.enabled}`,
-    `guidance limit   : ${runtime.recovery.maxFailures}`,
-    `pending failures : ${runtime.recovery.failures.length}`,
-    `tool calls seen  : ${runtime.stats.totalToolCalls}`,
-    `failed results   : ${runtime.stats.failedToolResults}`,
-    `log file         : ${sessionLogPath(logDir(ctx), sessionId(ctx))}`,
-  ].join("\n");
-}
-
 export interface MineResult {
   reportPath: string;
   source: MineSource;
@@ -125,11 +113,6 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
       name: "welder-stats",
       description: "Show pi-welder repair stats for this session",
       handler: async (_args, ctx) => { ctx.ui.notify(statsSummary(runtime.stats), "info"); },
-    },
-    {
-      name: "welder-status",
-      description: "Show pi-welder runtime status",
-      handler: async (_args, ctx) => { ctx.ui.notify(statusSummary(ctx, runtime), "info"); },
     },
     {
       name: "welder-reset",

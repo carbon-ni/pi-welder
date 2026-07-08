@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { loadMineEvents, mineFailures, mineSummary, parseLimitArg, parseMineSource, registerWelderCommands, statusSummary, welderCommandSpecs } from "./commands.ts";
+import { loadMineEvents, mineFailures, mineSummary, parseLimitArg, parseMineSource, registerWelderCommands, welderCommandSpecs } from "./commands.ts";
 import { createRuntime } from "./runtime.ts";
 import { buildToolResultEvent, type FailureEvent, type WelderEvent } from "./recorder/index.ts";
 
@@ -25,7 +25,6 @@ test("parseLimitArg accepts unsigned integers only", () => {
 
 const expectedCommands = [
   ["welder-stats", "Show pi-welder repair stats for this session"],
-  ["welder-status", "Show pi-welder runtime status"],
   ["welder-reset", "Reset pi-welder session stats and pending recovery guidance"],
   ["welder-on", "Enable pi-welder repairs"],
   ["welder-off", "Disable pi-welder repairs (analytics still tracked in-memory)"],
@@ -51,21 +50,6 @@ test("registerWelderCommands registers all command handlers", () => {
   registerWelderCommands({ registerCommand: (name: string, def: unknown) => { commands[name] = def; } } as any, createRuntime());
 
   assert.deepEqual(Object.keys(commands), expectedCommands.map(([name]) => name));
-});
-
-test("statusSummary renders runtime state and session log path", () => {
-  const runtime = createRuntime();
-  runtime.enabled = false;
-  runtime.stats.totalToolCalls = 2;
-  runtime.stats.failedToolResults = 1;
-  runtime.recovery.failures.push({ toolName: "read", inputKeys: [], errorText: "ENOENT", ts: "now" });
-
-  const summary = statusSummary(ctx(), runtime);
-
-  assert.match(summary, /enabled\s+: false/);
-  assert.match(summary, /tool calls seen\s+: 2/);
-  assert.match(summary, /failed results\s+: 1/);
-  assert.match(summary, /commands-test\.jsonl/);
 });
 
 // ─── mineFailures ───────────────────────────────────────────────────────
