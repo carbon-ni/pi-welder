@@ -6,6 +6,10 @@ import {
   recordToolResult,
 } from "./recovery.ts";
 import {
+  consumeRepairWarnings,
+  recordRepairWarnings,
+} from "./repair-warnings.ts";
+import {
   appendEvent,
   buildEvent,
   buildToolResultEvent,
@@ -52,6 +56,7 @@ export async function handleToolCall(
   const repair = repairToolInput(runtime, event.toolName, input as Record<string, unknown>);
   if (runtime.enabled && repair.repairs.length > 0) {
     applyRepairedInput(input as Record<string, unknown>, repair.result);
+    recordRepairWarnings(runtime.repairWarnings, repair.repairs, event.toolName);
     if (ctx.hasUI) ctx.ui.setStatus("welder", repairStatusText(event.toolName, repair.repairs));
   }
 
@@ -123,7 +128,9 @@ export async function handleToolResult(
 }
 
 export async function handleContext(runtime: WelderRuntime, event: ContextEvent): Promise<{ messages: unknown[] } | undefined> {
-  const messages = consumeRecoveryGuidance(runtime.recovery);
-  if (messages.length === 0) return undefined;
-  return { messages: [...event.messages, ...messages] };
+  const recoveryMessages = consumeRecoveryGuidance(runtime.recovery);
+  const warningMessages = consumeRepairWarnings(runtime.repairWarnings);
+  const all = [...recoveryMessages, ...warningMessages];
+  if (all.length === 0) return undefined;
+  return { messages: [...event.messages, ...all] };
 }

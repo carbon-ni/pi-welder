@@ -150,6 +150,54 @@ test("welder-reset clears stats and recovery without changing enabled state", as
   assert.match(shown, /failed results\s+: 0/);
 });
 
+test("tool_call repairs inject repair warnings into next context", async () => {
+  const c = loadExtension();
+  const cx = ctx();
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_call"]!({
+    toolName: "edit",
+    toolCallId: "1",
+    input: { edits: { oldText: "a", newText: "b" } },
+  }, cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
+  assert.equal(out.messages.length, 2);
+  assert.match(out.messages[1].content, /pi-welder repair hints/);
+  assert.match(out.messages[1].content, /wrap-object-array/);
+});
+
+test("tool_call repairs + tool_result failures inject both into same context", async () => {
+  const c = loadExtension();
+  const cx = ctx();
+  await c.handlers["session_start"]!({}, cx);
+  await c.handlers["tool_call"]!({
+    toolName: "edit",
+    toolCallId: "1",
+    input: { edits: { oldText: "a", newText: "b" } },
+  }, cx);
+  await c.handlers["tool_result"]!({
+    toolName: "read",
+    input: { path: "missing.ts" },
+    isError: true,
+    content: "ENOENT",
+  }, cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
+  // user message + recovery guidance + repair warnings = 3
+  assert.equal(out.messages.length, 3);
+  assert.match(out.messages[1].content, /pi-welder recovery hints/);
+  assert.match(out.messages[2].content, /pi-welder repair hints/);
+});
+
+test("context returns undefined when neither repairs nor failures", async () => {
+  const c = loadExtension();
+  const cx = ctx();
+  await c.handlers["session_start"]!({}, cx);
+
+  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
+  assert.equal(out, undefined);
+});
+
 test("tool_result failures inject recovery guidance into next context", async () => {
   const c = loadExtension();
   const cx = ctx();
