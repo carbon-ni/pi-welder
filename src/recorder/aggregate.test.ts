@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   aggregateFailures,
+  aggregateRepairs,
   type FailureCluster,
 } from "./aggregate.ts";
 import { buildToolResultEvent } from "./events.ts";
@@ -102,4 +103,18 @@ test("aggregateFailures groups unknown error kinds under TOOL_ERROR", () => {
   const events = [failureEvent("bash", "something weird happened")];
   const clusters = aggregateFailures(events);
   assert.equal(clusters[0]!.errorKind, "TOOL_ERROR");
+});
+
+test("aggregateRepairs ranks repair actions by provider, model, and tool", () => {
+  const events: WelderEvent[] = [
+    { ts: "1", eventType: "tool_call", toolName: "edit", provider: "anthropic", model: "opus", repairs: ["strip-extra-props"], wasRepaired: true, inputKeys: ["edits"] },
+    { ts: "2", eventType: "tool_call", toolName: "edit", provider: "anthropic", model: "opus", repairs: ["strip-extra-props", "array-shape"], wasRepaired: true, inputKeys: ["edits"] },
+    { ts: "3", eventType: "tool_call", toolName: "edit", provider: "openai", model: "gpt", repairs: ["strip-extra-props"], wasRepaired: true, inputKeys: ["edits"] },
+  ];
+
+  assert.deepEqual(aggregateRepairs(events), [
+    { provider: "anthropic", model: "opus", toolName: "edit", action: "strip-extra-props", count: 2 },
+    { provider: "anthropic", model: "opus", toolName: "edit", action: "array-shape", count: 1 },
+    { provider: "openai", model: "gpt", toolName: "edit", action: "strip-extra-props", count: 1 },
+  ]);
 });

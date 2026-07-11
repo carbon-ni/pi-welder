@@ -71,3 +71,11 @@ test("formatFailureReport header includes event source hint", () => {
   const out = formatFailureReport([cluster()]);
   assert.match(out, /source:.*jsonl/i);
 });
+
+test("formatFailureReport ranks repairs by model", () => {
+  const out = formatFailureReport([cluster()], [
+    { provider: "anthropic", model: "opus", toolName: "edit", action: "strip-extra-props", count: 4 },
+  ]);
+  assert.match(out, /repairs by model/i);
+  assert.match(out, /anthropic \/ opus \/ edit \/ strip-extra-props.*4/i);
+});

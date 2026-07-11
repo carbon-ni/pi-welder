@@ -27,6 +27,14 @@ export interface AggregateOptions {
   maxSamples?: number;
 }
 
+export interface RepairCluster {
+  provider: string;
+  model: string;
+  toolName: string;
+  action: string;
+  count: number;
+}
+
 const DEFAULT_MAX_SAMPLES = 3;
 
 /**
@@ -35,11 +43,36 @@ const DEFAULT_MAX_SAMPLES = 3;
  */
 export interface FailureEvent {
   toolName: string;
+  provider?: string;
+  model?: string;
+  repairs?: string[];
   wasError?: boolean;
   errorKind?: string;
   errorText?: string;
   inputKeys: string[];
   ts: string;
+}
+
+export function aggregateRepairs(events: readonly FailureEvent[]): RepairCluster[] {
+  const clusters = new Map<string, RepairCluster>();
+
+  for (const event of events) {
+    for (const action of event.repairs ?? []) {
+      const provider = event.provider ?? "unknown";
+      const model = event.model ?? "unknown";
+      const key = `${provider}\0${model}\0${event.toolName}\0${action}`;
+      const cluster = clusters.get(key) ?? { provider, model, toolName: event.toolName, action, count: 0 };
+      cluster.count += 1;
+      clusters.set(key, cluster);
+    }
+  }
+
+  return [...clusters.values()].sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return `${a.provider}\0${a.model}\0${a.toolName}\0${a.action}`.localeCompare(
+      `${b.provider}\0${b.model}\0${b.toolName}\0${b.action}`,
+    );
+  });
 }
 
 export function aggregateFailures(

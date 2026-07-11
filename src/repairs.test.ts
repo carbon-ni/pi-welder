@@ -221,6 +221,24 @@ test("leaves valid edits items untouched", () => {
   assert.equal(repairs.length, 0);
 });
 
+test("strips model-invented edit fields without changing content", () => {
+  const oldText = "line 1\n\"quoted\" 😀\nline 3";
+  const newText = "replacement\nwith \\ escapes\n";
+  const inventedFields = ["requireUnique", "oldText2", "newText2", "event.0.additionalProperties"];
+  const edit = Object.fromEntries([
+    ["oldText", oldText],
+    ["newText", newText],
+    ...inventedFields.map((field) => [field, field === "requireUnique" ? true : "nonsense"]),
+  ]);
+
+  const { result, repairs } = repairArgs({ edits: [edit] });
+
+  assert.deepEqual(result.edits, [{ oldText, newText }]);
+  assert.equal((result.edits as Array<Record<string, unknown>>)[0]!.oldText, oldText);
+  assert.equal((result.edits as Array<Record<string, unknown>>)[0]!.newText, newText);
+  assert.deepEqual(repairs.map((repair) => repair.action), ["strip-extra-props"]);
+});
+
 // ─── relational defaults ────────────────────────────────────────────────
 
 test("injects offset when only limit is present", () => {

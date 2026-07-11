@@ -10,6 +10,7 @@ import {
 } from "./recovery.ts";
 import {
   aggregateFailures,
+  aggregateRepairs,
   formatFailureReport,
   loadAllEvents,
   loadPiSessionEvents,
@@ -59,9 +60,11 @@ export async function mineFailures(
   reportDir: string,
   write: (dir: string, content: string) => Promise<string>,
   source: MineSource = "all",
+  modelRepairReportingEnabled = false,
 ): Promise<MineResult> {
   const clusters = aggregateFailures(events);
-  const report = formatFailureReport(clusters);
+  const repairs = modelRepairReportingEnabled ? aggregateRepairs(events) : [];
+  const report = formatFailureReport(clusters, repairs);
   const reportPath = await write(reportDir, report);
   const totalFailures = clusters.reduce((sum, c) => sum + c.count, 0);
   const top = clusters[0];
@@ -210,7 +213,13 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
             loadWelder: loadAllEvents,
             loadPi: loadPiSessionEvents,
           });
-          const result = await mineFailures(events, logDir(ctx), writeFailureReport, source);
+          const result = await mineFailures(
+            events,
+            logDir(ctx),
+            writeFailureReport,
+            source,
+            runtime.modelRepairReportingEnabled,
+          );
           ctx.ui.notify(mineSummary(result), "info");
         } catch (err) {
           ctx.ui.notify(`pi-welder: failed to mine failures: ${String(err)}`, "error");

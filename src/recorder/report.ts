@@ -5,9 +5,12 @@
  * recurring patterns can be studied and turned into new repair rules.
  */
 
-import type { FailureCluster } from "./aggregate.ts";
+import type { FailureCluster, RepairCluster } from "./aggregate.ts";
 
-export function formatFailureReport(clusters: readonly FailureCluster[]): string {
+export function formatFailureReport(
+  clusters: readonly FailureCluster[],
+  repairs: readonly RepairCluster[] = [],
+): string {
   const lines: string[] = [
     "# pi-welder failure report",
     "",
@@ -18,7 +21,6 @@ export function formatFailureReport(clusters: readonly FailureCluster[]): string
 
   if (clusters.length === 0) {
     lines.push("No failures recorded.");
-    return lines.join("\n");
   }
 
   for (const cluster of clusters) {
@@ -31,6 +33,14 @@ export function formatFailureReport(clusters: readonly FailureCluster[]): string
       }
     }
     lines.push("", "---", "");
+  }
+
+  if (repairs.length > 0) {
+    lines.push("## repairs by model", "");
+    for (const repair of repairs) {
+      lines.push(`- ${repair.provider} / ${repair.model} / ${repair.toolName} / ${repair.action} (×${repair.count})`);
+    }
+    lines.push("");
   }
 
   const total = clusters.reduce((sum, c) => sum + c.count, 0);

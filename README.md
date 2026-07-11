@@ -65,6 +65,16 @@ Valid input passes through unchanged. Field classification is centralized in [`s
 
 `/welder-mine` reads either welder's own logs, Pi's native session JSONL (`~/.pi/agent/sessions`), or both — so you can mine a week of real usage and let the data tell you the next rule to write.
 
+Per-model repair ranking is opt-in because it can increase report cardinality. Configure it in `~/.pi/agent/welder.json`:
+
+```json
+{
+  "modelRepairReportingEnabled": true
+}
+```
+
+When disabled or absent (default), mining behavior and reports remain failure-only. Restart Pi after changing the file.
+
 ## Architecture
 
 ```

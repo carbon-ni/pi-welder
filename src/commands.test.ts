@@ -77,6 +77,21 @@ test("mineFailures aggregates events, writes report, returns summary", async () 
   assert.match(written, /# pi-welder failure report/);
 });
 
+test("mineFailures includes per-model repairs only when feature flag is enabled", async () => {
+  const event: WelderEvent = {
+    ts: "t", eventType: "tool_call", toolName: "edit", provider: "anthropic", model: "opus",
+    repairs: ["strip-extra-props"], wasRepaired: true, inputKeys: ["edits"],
+  };
+  const reports: string[] = [];
+  const write = async (_dir: string, content: string) => { reports.push(content); return "/report.md"; };
+
+  await mineFailures([event], "/logs", write, "welder", false);
+  await mineFailures([event], "/logs", write, "welder", true);
+
+  assert.doesNotMatch(reports[0]!, /repairs by model/i);
+  assert.match(reports[1]!, /anthropic \/ opus \/ edit \/ strip-extra-props/i);
+});
+
 test("mineFailures with no events returns zero clusters", async () => {
   const result = await mineFailures([], "/fake/log", async () => "/fake/log/failures-report.md", "pi");
   assert.equal(result.clusters, 0);

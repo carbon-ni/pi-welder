@@ -11,6 +11,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerWelderCommands } from "./commands.ts";
+import { loadWelderConfig } from "./config.ts";
 import {
   DEFAULT_SESSION_RETENTION,
   handleContext,
@@ -22,7 +23,7 @@ import {
 import { createRuntime } from "./runtime.ts";
 
 export default function (pi: ExtensionAPI) {
-  const runtime = createRuntime();
+  const runtime = createRuntime(loadWelderConfig());
 
   pi.on("session_start", async (_event, ctx) => handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION));
 
