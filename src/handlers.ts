@@ -1,5 +1,7 @@
 import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
+import { repairToolResult as repairResult } from "./result-repairs/index.ts";
+import type { DirectoryReadResult } from "./result-repairs/directory-read.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -112,7 +114,15 @@ export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   ctx: ExtensionContext,
-): Promise<undefined> {
+): Promise<DirectoryReadResult | undefined> {
+  const resultRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
+  if (resultRepair) {
+    recordRepairs(runtime.stats, resultRepair.repairs);
+    await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, resultRepair.repairs);
+    recordToolResult(runtime.recovery, { ...event, ...resultRepair.patch });
+    return resultRepair.patch;
+  }
+
   recordToolResult(runtime.recovery, event);
   const errorText = extractToolErrorText(event);
   if (!errorText) return undefined;
@@ -125,6 +135,21 @@ export async function handleToolResult(
     errorText,
   })).catch(() => { /* logging never breaks recovery */ });
   return undefined;
+}
+
+async function recordResultRepairEvent(
+  ctx: ExtensionContext,
+  toolName: string,
+  input: Record<string, unknown>,
+  repairs: Repair[],
+): Promise<void> {
+  await appendEvent(logDir(ctx), sessionId(ctx), buildEvent({
+    eventType: "tool_result",
+    toolName,
+    ...modelMeta(ctx),
+    repairs,
+    inputKeys: Object.keys(input),
+  })).catch(() => { /* logging never breaks result repair */ });
 }
 
 export async function handleContext(runtime: WelderRuntime, event: ContextEvent): Promise<{ messages: unknown[] } | undefined> {

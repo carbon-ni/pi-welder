@@ -11,7 +11,8 @@ export type RepairAction =
   | "strip-extra-props"
   | "rename-aliased-field"
   | "relational-default"
-  | "nest-edit-fields";
+  | "nest-edit-fields"
+  | "directory-read";
 
 export interface Repair {
   field: string;

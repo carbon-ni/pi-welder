@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { applyRepairedInput, handleContext, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
@@ -14,6 +17,26 @@ function ctx(overrides: Partial<any> = {}): any {
     ...overrides,
   };
 }
+
+test("handleToolResult converts failed read of directory into listing", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-"));
+  await mkdir(path.join(root, "folder"));
+  await writeFile(path.join(root, "file.ts"), "x");
+  const runtime = createRuntime();
+  const event = {
+    toolName: "read", input: { path: root }, isError: true,
+    content: [{ type: "text", text: "EISDIR" }], details: {},
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result?.isError, false);
+  assert.match((result?.content?.[0] as { text: string }).text, /file\.ts/);
+  assert.match((result?.content?.[0] as { text: string }).text, /folder\//);
+  assert.equal(runtime.recovery.failures.length, 0);
+  assert.equal(runtime.stats.repairedToolCalls, 1);
+  assert.equal(runtime.stats.repairsByAction.get("directory-read"), 1);
+});
 
 test("handleToolCall repairs input through explicit runtime", async () => {
   const runtime = createRuntime();

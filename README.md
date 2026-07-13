@@ -16,6 +16,7 @@ Every agent makes the same recurring mistakes — a path wrapped in a markdown l
 - 🛡️ **Content-safe by contract** — `command`, `code`, `oldText`/`newText`, `text`, `content`, `prompt` and friends are never transformed. Only the *structure* is welded, never the workpiece.
 - 📋 **Lean observability** — append-only JSONL logs of repairs and failures, grouped by `(tool, errorKind)` into ranked clusters. Records signals, not user content.
 - 🩹 **Recovery guidance** — when a tool fails, welder injects a compact hint so the next turn fixes the cause instead of flailing.
+- 📁 **Directory reads** — when `read` receives a directory, welder replaces the error with a sorted file/folder listing (folders end in `/`; output is capped at 200 entries).
 - 🪶 **Zero footprint** — pure repair core, no Pi API leakage, never blocks tool execution. Side-effect failures are swallowed at the boundary.
 
 ## How it works
@@ -86,7 +87,8 @@ src/
 ├── pi-context.ts    adapters: log dir, session id, model metadata
 ├── fields.ts        field classification (single source of truth for rules)
 ├── recovery.ts      failed-result tracking + guidance generation
-├── repairs/         PURE repair core — engine, rules, helpers, types
+├── repairs/         PURE input-repair core — engine, rules, helpers, types
+├── result-repairs/  post-execution repair registry and result adapters
 └── recorder/        observability — stats, events, JSONL I/O, aggregate, report
 ```
 
@@ -94,7 +96,8 @@ src/
 - `index` wires `commands`, `handlers`, `runtime`.
 - `handlers` orchestrates lower-level modules; lower-level modules never import `handlers`.
 - `repairs/` stays pure — no Pi APIs, no I/O, no runtime state.
-- Side effects live at the `handlers.ts` boundary and never block tool execution.
+- `result-repairs/` owns post-execution repair rules; `handlers` only orchestrates and records their signals.
+- Side-effect failures never block tool execution.
 
 See [`AGENTS.md`](AGENTS.md), [`src/repairs/AGENTS.md`](src/repairs/AGENTS.md), and [`src/recorder/AGENTS.md`](src/recorder/AGENTS.md) for the module contracts.
 

@@ -517,7 +517,7 @@ test("all repair actions are documented spellings", () => {
     "strip-null", "strip-null-like", "clean-path", "parse-json",
     "wrap-array", "wrap-object-array", "split-string",
     "coerce-boolean", "coerce-number", "strip-extra-props",
-    "rename-aliased-field", "relational-default", "nest-edit-fields",
+    "rename-aliased-field", "relational-default", "nest-edit-fields", "directory-read",
   ];
   const { repairs } = repairArgs({
     path: null, limit: null, target: "none", names: "[\"a\"]",
