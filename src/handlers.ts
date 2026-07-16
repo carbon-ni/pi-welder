@@ -2,7 +2,7 @@ import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } f
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import { repairToolResult as repairResult } from "./result-repairs/index.ts";
 import type { DirectoryReadResult } from "./result-repairs/directory-read.ts";
-import { recoverEditMismatch, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
+import { preflightEditMismatch, recoverEditMismatch, type ModelRecoveryObservation, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -16,6 +16,7 @@ import {
   appendEvent,
   buildEvent,
   buildToolResultEvent,
+  buildModelRecoveryEvent,
   pruneOldSessions,
   recordRepairs,
   recordToolFailure,
@@ -64,6 +65,21 @@ export async function handleToolCall(
   }
 
   await recordRepairEvent(ctx, event.toolName, repair);
+
+  if (runtime.enabled && event.toolName === "edit") {
+    const preflight = await preflightEditMismatch({
+      toolInput: input as Record<string, unknown>,
+      cwd: ctx.cwd,
+      settings: runtime.modelRecovery,
+      onObservation: (observation) => observeModelRecovery(runtime, event.toolName, observation, ctx),
+    });
+    if (preflight) {
+      const repairs: Repair[] = Array.from({ length: preflight.repairedEdits }, (_, index) => ({ field: `edits[${index}].oldText`, action: "model-locate-old-text" }));
+      recordRepairs(runtime.stats, repairs);
+      recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
+      await recordResultRepairEvent(ctx, event.toolName, input as Record<string, unknown>, repairs);
+    }
+  }
   return undefined;
 }
 
@@ -128,6 +144,7 @@ export async function handleToolResult(
     event,
     cwd: ctx.cwd,
     settings: runtime.modelRecovery,
+    onObservation: (observation) => observeModelRecovery(runtime, event.toolName, observation, ctx),
   }) : undefined;
   if (modelRepair) {
     recordRepairs(runtime.stats, modelRepair.repairs);
@@ -148,6 +165,24 @@ export async function handleToolResult(
     errorText,
   })).catch(() => { /* logging never breaks recovery */ });
   return undefined;
+}
+
+async function observeModelRecovery(runtime: WelderRuntime, toolName: string, observation: ModelRecoveryObservation, ctx: ExtensionContext): Promise<void> {
+  if (ctx.hasUI) ctx.ui.setStatus("welder", modelRecoveryStatus(observation.stage, observation.outcome, observation.reason));
+  await appendEvent(logDir(ctx), sessionId(ctx), buildModelRecoveryEvent({
+    toolName, provider: "openrouter", model: runtime.modelRecovery.model, ...observation,
+  })).catch(() => {});
+}
+
+export function modelRecoveryStatus(stage: string, outcome: string, reason?: string): string {
+  if (stage === "detected" && outcome === "attempting") return "🔧 edit: analyzing mismatch…";
+  if (stage === "requested") return "🔧 edit: reasoning…";
+  if ((stage === "decided" && outcome === "repair") || (stage === "validated" && outcome === "accepted")) return "🔧 edit: validating…";
+  if (outcome === "success") return "🔧 edit: recovered";
+  if (outcome === "abstained") return "🔧 edit: model abstained";
+  if (outcome === "failed") return "🔧 edit: recovery unavailable";
+  if (outcome === "rejected" || outcome === "skipped") return `🔧 edit: recovery ${outcome}${reason ? ` — ${reason}` : ""}`;
+  return "🔧 edit: recovery detected";
 }
 
 async function recordResultRepairEvent(

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { applyRepairedInput, handleContext, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
+import { applyRepairedInput, handleContext, handleToolCall, handleToolResult, modelRecoveryStatus, repairStatusText } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
 
 function ctx(overrides: Partial<any> = {}): any {
@@ -78,6 +78,12 @@ test("repairStatusText summarizes first repairs and remaining count", () => {
     ]),
     "🔧 edit: clean-path, parse-json (+1)",
   );
+});
+
+test("modelRecoveryStatus exposes progress and terminal outcomes", () => {
+  assert.equal(modelRecoveryStatus("requested", "pending"), "🔧 edit: reasoning…");
+  assert.equal(modelRecoveryStatus("applied", "success"), "🔧 edit: recovered");
+  assert.match(modelRecoveryStatus("validated", "rejected", "ambiguous"), /ambiguous/);
 });
 
 test("handleContext injects recovery guidance through explicit runtime", async () => {

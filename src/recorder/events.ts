@@ -2,7 +2,7 @@ import type { Repair } from "../repairs/index.ts";
 
 export interface WelderEvent {
   ts: string;
-  eventType: "tool_call" | "tool_result";
+  eventType: "tool_call" | "tool_result" | "model_recovery";
   toolName: string;
   provider: string;
   model: string;
@@ -12,6 +12,14 @@ export interface WelderEvent {
   wasError?: boolean;
   errorKind?: string;
   errorText?: string;
+  recoveryStage?: string;
+  recoveryOutcome?: string;
+  recoveryReason?: string;
+  durationMs?: number;
+  confidence?: number;
+  editCount?: number;
+  unresolvedEditCount?: number;
+  fileBytes?: number;
 }
 
 interface BuildEventInput {
@@ -21,6 +29,20 @@ interface BuildEventInput {
   model: string;
   repairs: Repair[];
   inputKeys: string[];
+}
+
+export interface BuildModelRecoveryEventInput {
+  toolName: string;
+  provider: string;
+  model: string;
+  stage: string;
+  outcome: string;
+  reason?: string;
+  durationMs?: number;
+  confidence?: number;
+  editCount?: number;
+  unresolvedEditCount?: number;
+  fileBytes?: number;
 }
 
 interface BuildToolResultEventInput {
@@ -58,6 +80,16 @@ export function buildToolResultEvent(input: BuildToolResultEventInput): WelderEv
     wasError: true,
     errorKind: classifyErrorKind(input.errorText),
     errorText: truncate(input.errorText, 500),
+  };
+}
+
+export function buildModelRecoveryEvent(input: BuildModelRecoveryEventInput): WelderEvent {
+  return {
+    ts: new Date().toISOString(), eventType: "model_recovery", toolName: input.toolName,
+    provider: input.provider, model: input.model, repairs: [], wasRepaired: input.outcome === "success", inputKeys: [],
+    recoveryStage: input.stage, recoveryOutcome: input.outcome, recoveryReason: input.reason,
+    durationMs: input.durationMs, confidence: input.confidence, editCount: input.editCount,
+    unresolvedEditCount: input.unresolvedEditCount, fileBytes: input.fileBytes,
   };
 }
 

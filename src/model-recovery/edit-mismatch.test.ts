@@ -4,15 +4,34 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { recoverEditMismatch } from "./edit-mismatch.ts";
+import { preflightEditMismatch, recoverEditMismatch } from "./edit-mismatch.ts";
 
-const failure = "Could not find edits[0] in file.ts. The oldText must match exactly including all whitespace and newlines.";
+const failure = "Could not find the exact text in file.ts. The old text must match exactly including all whitespace and newlines.";
+
+test("preflight repairs oldText before built-in edit executes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-model-preflight-"));
+  await writeFile(path.join(root, "file.ts"), "const value = 1; // current\n");
+  const toolInput = { path: "file.ts", edits: [{ oldText: "const value=1;", newText: "const value = 2;" }] };
+
+  const result = await preflightEditMismatch({
+    toolInput,
+    cwd: root,
+    settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test/api/v1", minConfidence: 0.9 },
+    callModel: async () => ({ decision: "repair", confidence: 0.98, repairs: [{ index: 0, oldText: "const value = 1; // current" }] }),
+  });
+
+  assert.equal(result?.repairedEdits, 1);
+  assert.equal(toolInput.edits[0]?.oldText, "const value = 1; // current");
+  assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), "const value = 1; // current\n");
+});
 
 test("recovers edit mismatch using model-located exact text", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-model-recovery-"));
   await writeFile(path.join(root, "file.ts"), "const value = 1; // current\n");
 
+  const observations: string[] = [];
   const result = await recoverEditMismatch({
+    onObservation: async (event) => { observations.push(`${event.stage}:${event.outcome}`); },
     event: {
       toolName: "edit",
       input: { path: "file.ts", edits: [{ oldText: "const value=1;", newText: "const value = 2;" }] },
@@ -27,6 +46,7 @@ test("recovers edit mismatch using model-located exact text", async () => {
   assert.equal(result?.patch.isError, false);
   assert.match(String(result?.patch.content[0]?.text), /Recovered edit mismatch/);
   assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), "const value = 2;\n");
+  assert.deepEqual(observations, ["detected:attempting", "requested:pending", "decided:repair", "validated:accepted", "applied:success"]);
 });
 
 test("abstains when proposed oldText is ambiguous", async () => {

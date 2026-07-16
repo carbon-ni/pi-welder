@@ -11,6 +11,7 @@ import {
   recordValidation,
   buildEvent,
   buildToolResultEvent,
+  buildModelRecoveryEvent,
   appendEvent,
   readEvents,
   loadAllEvents,
@@ -118,6 +119,18 @@ test("buildToolResultEvent records bounded failure context", () => {
   assert.equal(ev.errorKind, "ENOENT");
   assert.equal(ev.inputKeys[0], "path");
   assert.match(ev.errorText ?? "", /ENOENT/);
+});
+
+test("buildModelRecoveryEvent records reasoning lifecycle context", () => {
+  const ev = buildModelRecoveryEvent({
+    toolName: "edit", provider: "openrouter", model: "cheap/model", stage: "validated",
+    outcome: "rejected", reason: "ambiguous-match", durationMs: 42, confidence: 0.8,
+    editCount: 2, unresolvedEditCount: 1, fileBytes: 100,
+  });
+  assert.equal(ev.eventType, "model_recovery");
+  assert.equal(ev.recoveryStage, "validated");
+  assert.equal(ev.recoveryReason, "ambiguous-match");
+  assert.equal(ev.durationMs, 42);
 });
 
 // ─── JSONL append + read round-trip ─────────────────────────────────────

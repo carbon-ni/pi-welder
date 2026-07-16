@@ -7,7 +7,8 @@
  * wrong?" without burdening disk or the LLM context.
  */
 
-export { buildEvent, buildToolResultEvent } from "./events.ts";
+export { buildEvent, buildToolResultEvent, buildModelRecoveryEvent } from "./events.ts";
+export type { BuildModelRecoveryEventInput } from "./events.ts";
 export type { WelderEvent } from "./events.ts";
 export { appendEvent, loadAllEvents, listSessionLogs, pruneOldSessions, readEvents, sessionLogPath, writeFailureReport, FAILURE_REPORT_FILENAME } from "./log.ts";
 export { createStats, recordRepairs, recordToolFailure, recordValidation, statsSummary } from "./stats.ts";
