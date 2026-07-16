@@ -2,6 +2,7 @@ import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } f
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import { repairToolResult as repairResult } from "./result-repairs/index.ts";
 import type { DirectoryReadResult } from "./result-repairs/directory-read.ts";
+import { recoverEditMismatch, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -114,13 +115,25 @@ export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   ctx: ExtensionContext,
-): Promise<DirectoryReadResult | undefined> {
-  const resultRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
-  if (resultRepair) {
-    recordRepairs(runtime.stats, resultRepair.repairs);
-    await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, resultRepair.repairs);
-    recordToolResult(runtime.recovery, { ...event, ...resultRepair.patch });
-    return resultRepair.patch;
+): Promise<DirectoryReadResult | ModelRecoveryPatch | undefined> {
+  const deterministicRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
+  if (deterministicRepair) {
+    recordRepairs(runtime.stats, deterministicRepair.repairs);
+    await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, deterministicRepair.repairs);
+    recordToolResult(runtime.recovery, { ...event, ...deterministicRepair.patch });
+    return deterministicRepair.patch;
+  }
+
+  const modelRepair = runtime.enabled ? await recoverEditMismatch({
+    event,
+    cwd: ctx.cwd,
+    settings: runtime.modelRecovery,
+  }) : undefined;
+  if (modelRepair) {
+    recordRepairs(runtime.stats, modelRepair.repairs);
+    await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, modelRepair.repairs);
+    recordToolResult(runtime.recovery, { ...event, ...modelRepair.patch });
+    return modelRepair.patch;
   }
 
   recordToolResult(runtime.recovery, event);

@@ -12,7 +12,8 @@ export type RepairAction =
   | "rename-aliased-field"
   | "relational-default"
   | "nest-edit-fields"
-  | "directory-read";
+  | "directory-read"
+  | "model-locate-old-text";
 
 export interface Repair {
   field: string;
