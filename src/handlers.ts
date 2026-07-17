@@ -71,7 +71,10 @@ export async function handleToolCall(
       toolInput: input as Record<string, unknown>,
       cwd: ctx.cwd,
       settings: runtime.modelRecovery,
-      onObservation: (observation) => observeModelRecovery(runtime, event.toolName, observation, ctx),
+      onObservation: (observation) => {
+        runtime.modelRecoveryPreflightAttempts.add(event.toolCallId);
+        return observeModelRecovery(runtime, event.toolName, observation, ctx);
+      },
     });
     if (preflight) {
       const repairs: Repair[] = Array.from({ length: preflight.repairedEdits }, (_, index) => ({ field: `edits[${index}].oldText`, action: "model-locate-old-text" }));
@@ -140,7 +143,9 @@ export async function handleToolResult(
     return deterministicRepair.patch;
   }
 
-  const modelRepair = runtime.enabled ? await recoverEditMismatch({
+  const resultToolCallId = (event as ToolResultEvent & { toolCallId?: string }).toolCallId;
+  const preflightAttempted = resultToolCallId ? runtime.modelRecoveryPreflightAttempts.delete(resultToolCallId) : false;
+  const modelRepair = runtime.enabled && !preflightAttempted ? await recoverEditMismatch({
     event,
     cwd: ctx.cwd,
     settings: runtime.modelRecovery,

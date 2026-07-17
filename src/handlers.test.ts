@@ -101,6 +101,17 @@ test("handleContext injects recovery guidance through explicit runtime", async (
   assert.match(String(guidance?.content), /read a fresh snippet/);
 });
 
+test("handleToolResult does not retry model after preflight already attempted", async () => {
+  const runtime = createRuntime({ modelRecovery: { enabled: true, apiKey: "fake", model: "cheap/model", baseUrl: "https://invalid.test", minConfidence: 0.9 } });
+  runtime.modelRecoveryPreflightAttempts.add("call-1");
+  const event = { toolCallId: "call-1", toolName: "edit", input: { path: "file.ts", edits: [{ oldText: "x", newText: "y" }] }, isError: true, content: "oldText must match exactly" } as any;
+
+  await handleToolResult(runtime, event, ctx());
+
+  assert.equal(runtime.modelRecoveryPreflightAttempts.has("call-1"), false);
+  assert.equal(runtime.recovery.failures.length, 1);
+});
+
 test("handleToolCall records repair warnings in runtime", async () => {
   const runtime = createRuntime();
   const event = { toolName: "edit", input: { edits: { oldText: "a", newText: "b" } } };

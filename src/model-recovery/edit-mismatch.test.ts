@@ -17,12 +17,37 @@ test("preflight repairs oldText before built-in edit executes", async () => {
     toolInput,
     cwd: root,
     settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test/api/v1", minConfidence: 0.9 },
-    callModel: async () => ({ decision: "repair", confidence: 0.98, repairs: [{ index: 0, oldText: "const value = 1; // current" }] }),
+    callModel: async () => ({ decision: "repair", confidence: 0.98, repairs: [{ oldText: "const value = 1; // current" }] }),
   });
 
   assert.equal(result?.repairedEdits, 1);
   assert.equal(toolInput.edits[0]?.oldText, "const value = 1; // current");
   assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), "const value = 1; // current\n");
+});
+
+test("maps ordered model candidates to unresolved edits without model-owned indexes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-model-positional-"));
+  await writeFile(path.join(root, "file.ts"), "const stable = 1;\nconst current = 2;\n");
+  const toolInput = { path: "file.ts", edits: [
+    { oldText: "const stable = 1;", newText: "const stable = 3;" },
+    { oldText: "const stale=2;", newText: "const current = 4;" },
+  ] };
+
+  let modelPrompt = "";
+  await preflightEditMismatch({
+    toolInput, cwd: root,
+    settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test", minConfidence: 0.9 },
+    callModel: async (request) => {
+      modelPrompt = request.prompt;
+      return { decision: "repair", confidence: 1, repairs: [{ oldText: "const current = 2;" }] };
+    },
+  });
+
+  assert.doesNotMatch(modelPrompt, /"index"/);
+  assert.match(modelPrompt, /same number and order/);
+  assert.match(modelPrompt, /verbatim substring/);
+  assert.equal(toolInput.edits[0]?.oldText, "const stable = 1;");
+  assert.equal(toolInput.edits[1]?.oldText, "const current = 2;");
 });
 
 test("recovers edit mismatch using model-located exact text", async () => {
@@ -40,7 +65,7 @@ test("recovers edit mismatch using model-located exact text", async () => {
     },
     cwd: root,
     settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test/api/v1", minConfidence: 0.9 },
-    callModel: async () => ({ decision: "repair", confidence: 0.98, repairs: [{ index: 0, oldText: "const value = 1; // current" }] }),
+    callModel: async () => ({ decision: "repair", confidence: 0.98, repairs: [{ oldText: "const value = 1; // current" }] }),
   });
 
   assert.equal(result?.patch.isError, false);
@@ -57,7 +82,7 @@ test("abstains when proposed oldText is ambiguous", async () => {
     event: { toolName: "edit", input: { path: "file.ts", edits: [{ oldText: "missing", newText: "next" }] }, isError: true, content: failure },
     cwd: root,
     settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test/api/v1", minConfidence: 0.9 },
-    callModel: async () => ({ decision: "repair", confidence: 0.99, repairs: [{ index: 0, oldText: "same" }] }),
+    callModel: async () => ({ decision: "repair", confidence: 0.99, repairs: [{ oldText: "same" }] }),
   });
 
   assert.equal(result, undefined);
@@ -75,7 +100,7 @@ test("abstains when file changes while model is reasoning", async () => {
     settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test/api/v1", minConfidence: 0.9 },
     callModel: async () => {
       await writeFile(target, "const value = 3;\n");
-      return { decision: "repair", confidence: 0.99, repairs: [{ index: 0, oldText: "const value = 1;" }] };
+      return { decision: "repair", confidence: 0.99, repairs: [{ oldText: "const value = 1;" }] };
     },
   });
 

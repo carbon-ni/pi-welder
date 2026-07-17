@@ -1,7 +1,7 @@
 export interface EditRecoveryDecision {
   decision: "repair" | "abstain";
   confidence: number;
-  repairs: Array<{ index: number; oldText: string }>;
+  repairs: Array<{ oldText: string }>;
 }
 
 interface CallInput {
@@ -47,8 +47,8 @@ function validateDecision(value: unknown): EditRecoveryDecision {
   const repairs = input.repairs.map((repair) => {
     if (!repair || typeof repair !== "object") throw new Error("Model recovery repair is invalid.");
     const item = repair as Record<string, unknown>;
-    if (!Number.isInteger(item.index) || typeof item.oldText !== "string" || !item.oldText) throw new Error("Model recovery repair is invalid.");
-    return { index: item.index as number, oldText: item.oldText };
+    if (typeof item.oldText !== "string" || !item.oldText) throw new Error("Model recovery repair is invalid.");
+    return { oldText: item.oldText };
   });
   return { decision: input.decision, confidence: input.confidence, repairs };
 }

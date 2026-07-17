@@ -10,6 +10,7 @@ export interface WelderRuntime {
   enabled: boolean;
   modelRepairReportingEnabled: boolean;
   modelRecovery: ModelRecoverySettings;
+  modelRecoveryPreflightAttempts: Set<string>;
 }
 
 export interface RuntimeOptions {
@@ -24,6 +25,7 @@ export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
     repairWarnings: createRepairWarningState(),
     enabled: true,
     modelRepairReportingEnabled: options.modelRepairReportingEnabled ?? false,
+    modelRecoveryPreflightAttempts: new Set(),
     modelRecovery: options.modelRecovery ?? {
       enabled: false,
       model: "google/gemini-2.5-flash-lite",
@@ -38,4 +40,5 @@ export function resetSessionState(runtime: WelderRuntime): void {
   runtime.stats = createStats();
   runtime.recovery = createRecoveryState(maxFailures);
   runtime.repairWarnings = createRepairWarningState();
+  runtime.modelRecoveryPreflightAttempts.clear();
 }

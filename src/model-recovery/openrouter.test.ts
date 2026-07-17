@@ -7,7 +7,7 @@ test("calls configured OpenRouter model and parses fenced JSON", async () => {
   let request: RequestInit | undefined;
   const result = await callEditRecoveryModel({ model: "cheap/model", prompt: "locate", apiKey: "secret", baseUrl: "https://router.test/api/v1", fetchImpl: async (_url, init) => {
     request = init;
-    return new Response(JSON.stringify({ choices: [{ message: { content: "```json\n{\"decision\":\"repair\",\"confidence\":0.95,\"repairs\":[{\"index\":0,\"oldText\":\"exact\"}]}\n```" } }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "```json\n{\"decision\":\"repair\",\"confidence\":0.95,\"repairs\":[{\"oldText\":\"exact\"}]}\n```" } }] }), { status: 200 });
   }});
 
   assert.equal(result.decision, "repair");
