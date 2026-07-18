@@ -34,38 +34,60 @@ interface ModelRecoveryDependencies {
 }
 
 export async function preflightEditMismatch(input: ModelRecoveryDependencies & { toolInput: Record<string, unknown> }): Promise<{ repairedEdits: number } | undefined> {
-  if (!input.settings.enabled || !input.settings.apiKey) return undefined;
+  if (!input.settings.enabled) return undefined;
   const target = input.toolInput.path;
   const edits = parseEdits(input.toolInput.edits);
   if (typeof target !== "string" || edits.length === 0) return undefined;
 
   const current = await readFile(resolve(input.cwd, target), "utf8").catch(() => undefined);
   if (current === undefined || current.length > 200_000) return undefined;
-  const unresolved = edits.map((edit, index) => ({ ...edit, index })).filter(({ oldText, newText }) => countOccurrences(current, oldText) !== 1 && !current.includes(newText));
-  if (unresolved.length === 0) return undefined;
+  const pending = edits.map((edit, index) => ({ ...edit, index })).filter(({ oldText, newText }) => countOccurrences(current, oldText) !== 1 && !current.includes(newText));
+  if (pending.length === 0) return undefined;
 
-  await input.onObservation?.({ stage: "detected", outcome: "attempting", editCount: edits.length, unresolvedEditCount: unresolved.length, fileBytes: current.length });
-  await input.onObservation?.({ stage: "requested", outcome: "pending", editCount: edits.length, unresolvedEditCount: unresolved.length, fileBytes: current.length });
-  const started = Date.now();
-  let decision: EditRecoveryDecision;
-  try {
-    decision = await (input.callModel ?? callEditRecoveryModel)({ model: input.settings.model, apiKey: input.settings.apiKey, baseUrl: input.settings.baseUrl, signal: input.signal, prompt: buildPrompt(target, current, unresolved) });
-  } catch (error) {
-    await input.onObservation?.({ stage: "decided", outcome: "failed", reason: sanitizeError(error), durationMs: Date.now() - started });
-    return undefined;
-  }
-  await input.onObservation?.({ stage: "decided", outcome: decision.decision === "repair" ? "repair" : "abstained", confidence: decision.confidence, durationMs: Date.now() - started });
-  if (decision.decision !== "repair" || decision.confidence < input.settings.minConfidence) return undefined;
-  const validation = validateRepairs(current, unresolved, decision);
-  if (!validation.repairs) {
-    await input.onObservation?.({ stage: "validated", outcome: "rejected", reason: validation.reason, confidence: decision.confidence });
+  await input.onObservation?.({ stage: "detected", outcome: "attempting", editCount: edits.length, unresolvedEditCount: pending.length, fileBytes: current.length });
+  const local = resolveAmbiguousEdits(current, edits, pending);
+  if (!local.repairs) {
+    await input.onObservation?.({ stage: "validated", outcome: "rejected", reason: local.reason, editCount: edits.length, unresolvedEditCount: pending.length, fileBytes: current.length });
     return undefined;
   }
 
-  for (const repair of validation.repairs) edits[repair.index]!.oldText = repair.oldText;
-  input.toolInput.edits = edits;
-  await input.onObservation?.({ stage: "validated", outcome: "accepted", confidence: decision.confidence });
-  return { repairedEdits: validation.repairs.length };
+  const missing = pending.filter(({ oldText }) => countOccurrences(current, oldText) === 0);
+  const repairs: Array<{ index: number; oldText: string; newText?: string }> = [...local.repairs];
+  let confidence: number | undefined;
+  if (missing.length > 0) {
+    if (!input.settings.apiKey) return undefined;
+    await input.onObservation?.({ stage: "requested", outcome: "pending", editCount: edits.length, unresolvedEditCount: missing.length, fileBytes: current.length });
+    const started = Date.now();
+    let decision: EditRecoveryDecision;
+    try {
+      decision = await (input.callModel ?? callEditRecoveryModel)({ model: input.settings.model, apiKey: input.settings.apiKey, baseUrl: input.settings.baseUrl, signal: input.signal, prompt: buildPrompt(target, current, missing) });
+    } catch (error) {
+      await input.onObservation?.({ stage: "decided", outcome: "failed", reason: sanitizeError(error), durationMs: Date.now() - started });
+      return undefined;
+    }
+    confidence = decision.confidence;
+    await input.onObservation?.({ stage: "decided", outcome: decision.decision === "repair" ? "repair" : "abstained", confidence, durationMs: Date.now() - started });
+    if (decision.decision !== "repair" || confidence < input.settings.minConfidence) return undefined;
+    const validation = validateRepairs(current, missing, decision);
+    if (!validation.repairs) {
+      await input.onObservation?.({ stage: "validated", outcome: "rejected", reason: validation.reason, confidence });
+      return undefined;
+    }
+    repairs.push(...validation.repairs);
+  }
+
+  const repairedEdits = edits.map((edit) => ({ ...edit }));
+  for (const repair of repairs) {
+    repairedEdits[repair.index]!.oldText = repair.oldText;
+    if (repair.newText !== undefined) repairedEdits[repair.index]!.newText = repair.newText;
+  }
+  if (!haveNonOverlappingUniqueTargets(current, repairedEdits)) {
+    await input.onObservation?.({ stage: "validated", outcome: "rejected", reason: "repaired-edit-targets-overlap", confidence });
+    return undefined;
+  }
+  input.toolInput.edits = repairedEdits;
+  await input.onObservation?.({ stage: "validated", outcome: "accepted", confidence });
+  return { repairedEdits: repairs.length };
 }
 
 export async function recoverEditMismatch(input: {
@@ -175,10 +197,89 @@ function parseEdits(value: unknown): EditInput[] {
 }
 
 function countOccurrences(content: string, value: string): number {
-  if (!value) return 0;
-  let count = 0;
-  for (let from = 0; (from = content.indexOf(value, from)) !== -1; from += value.length) count++;
-  return count;
+  return occurrenceOffsets(content, value).length;
+}
+
+function occurrenceOffsets(content: string, value: string): number[] {
+  if (!value) return [];
+  const offsets: number[] = [];
+  for (let from = 0; (from = content.indexOf(value, from)) !== -1; from += value.length) offsets.push(from);
+  return offsets;
+}
+
+interface TextRange { start: number; end: number }
+interface LocalRepair { index: number; oldText: string; newText: string; range: TextRange }
+
+function resolveAmbiguousEdits(
+  current: string,
+  edits: EditInput[],
+  pending: Array<EditInput & { index: number }>,
+): { repairs?: LocalRepair[]; reason?: string } {
+  const uniqueRanges = edits.flatMap((edit, index) => {
+    const offsets = occurrenceOffsets(current, edit.oldText);
+    return offsets.length === 1 ? [{ index, start: offsets[0]!, end: offsets[0]! + edit.oldText.length }] : [];
+  });
+  const repairs: LocalRepair[] = [];
+
+  for (const edit of pending) {
+    const offsets = occurrenceOffsets(current, edit.oldText);
+    if (offsets.length < 2) continue;
+    const protectedRanges = [
+      ...uniqueRanges.filter(({ index }) => index !== edit.index),
+      ...repairs.map(({ index, range }) => ({ index, ...range })),
+    ];
+    const candidates = offsets.flatMap((start) => {
+      const originalRange = { start, end: start + edit.oldText.length };
+      if (protectedRanges.some((range) => rangesOverlap(originalRange, range))) return [];
+      const expanded = findUniqueExpansion(current, edit.oldText, start);
+      if (!expanded || protectedRanges.some((range) => rangesOverlap(expanded, range))) return [];
+      const prefix = current.slice(expanded.start, start);
+      const suffix = current.slice(start + edit.oldText.length, expanded.end);
+      return [{ index: edit.index, oldText: current.slice(expanded.start, expanded.end), newText: prefix + edit.newText + suffix, range: expanded }];
+    });
+    if (candidates.length !== 1) return { reason: `ambiguous-local-candidates:index-${edit.index}:matches-${candidates.length}` };
+    repairs.push(candidates[0]!);
+  }
+  return { repairs };
+}
+
+function findUniqueExpansion(current: string, oldText: string, start: number): TextRange | undefined {
+  const end = start + oldText.length;
+  const leftExtra = findMinimumUniqueExtra(start, (extra) => current.slice(start - extra, end), current);
+  const rightExtra = findMinimumUniqueExtra(current.length - end, (extra) => current.slice(start, end + extra), current);
+  if (leftExtra === undefined && rightExtra === undefined) return undefined;
+  if (rightExtra !== undefined && (leftExtra === undefined || rightExtra <= leftExtra)) return { start, end: end + rightExtra };
+  return { start: start - leftExtra!, end };
+}
+
+function findMinimumUniqueExtra(maxExtra: number, candidateAt: (extra: number) => string, current: string): number | undefined {
+  if (maxExtra === 0) return undefined;
+  let high = 1;
+  while (high < maxExtra && countOccurrences(current, candidateAt(high)) !== 1) high = Math.min(maxExtra, high * 2);
+  if (countOccurrences(current, candidateAt(high)) !== 1) return undefined;
+  let low = 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (countOccurrences(current, candidateAt(middle)) === 1) high = middle;
+    else low = middle + 1;
+  }
+  return low;
+}
+
+function rangesOverlap(left: TextRange, right: TextRange): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
+function haveNonOverlappingUniqueTargets(current: string, edits: EditInput[]): boolean {
+  const ranges: TextRange[] = [];
+  for (const edit of edits) {
+    const offsets = occurrenceOffsets(current, edit.oldText);
+    if (offsets.length !== 1) continue;
+    const range = { start: offsets[0]!, end: offsets[0]! + edit.oldText.length };
+    if (ranges.some((existing) => rangesOverlap(existing, range))) return false;
+    ranges.push(range);
+  }
+  return true;
 }
 
 function validateRepairs(current: string, unresolved: Array<EditInput & { index: number }>, decision: EditRecoveryDecision): { repairs?: Array<{ index: number; oldText: string }>; reason?: string } {
