@@ -33,6 +33,7 @@ Use this file as the index. Read nested module guides before changing folder mod
 - Keep repair behavior content-safe. Do not transform content fields such as command, code, or exact text replacements unless tests define that contract.
 - Repairs should fix argument structure/types, not reinterpret user intent.
 - Logging and recovery must never block or break tool execution; swallow side-effect failures at the handler boundary.
+- When edit recovery cannot safely apply a change, return bounded fresh target-file context in the error so the agent does not need a separate read round.
 - Keep event log schema lean. Log signals useful for debugging model/tool behavior, not full user content.
 
 ## Testing

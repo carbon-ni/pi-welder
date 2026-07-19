@@ -3,6 +3,7 @@ import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.
 import { repairToolResult as repairResult } from "./result-repairs/index.ts";
 import type { DirectoryReadResult } from "./result-repairs/directory-read.ts";
 import { preflightEditMismatch, recoverEditMismatch, type ModelRecoveryObservation, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
+import { appendEditFailureContext, type EditFailureContextPatch } from "./model-recovery/edit-failure-context.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -134,7 +135,7 @@ export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   ctx: ExtensionContext,
-): Promise<DirectoryReadResult | ModelRecoveryPatch | undefined> {
+): Promise<DirectoryReadResult | ModelRecoveryPatch | EditFailureContextPatch | undefined> {
   const deterministicRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
   if (deterministicRepair) {
     recordRepairs(runtime.stats, deterministicRepair.repairs);
@@ -158,9 +159,12 @@ export async function handleToolResult(
     return modelRepair.patch;
   }
 
-  recordToolResult(runtime.recovery, event);
+  const failureContext = runtime.enabled
+    ? await appendEditFailureContext(event, ctx.cwd).catch(() => undefined)
+    : undefined;
+  recordToolResult(runtime.recovery, failureContext ? { ...event, ...failureContext } : event);
   const errorText = extractToolErrorText(event);
-  if (!errorText) return undefined;
+  if (!errorText) return failureContext;
 
   recordToolFailure(runtime.stats, event.toolName);
   await appendEvent(logDir(ctx), sessionId(ctx), buildToolResultEvent({
@@ -169,7 +173,7 @@ export async function handleToolResult(
     inputKeys: Object.keys(event.input ?? {}),
     errorText,
   })).catch(() => { /* logging never breaks recovery */ });
-  return undefined;
+  return failureContext;
 }
 
 async function observeModelRecovery(runtime: WelderRuntime, toolName: string, observation: ModelRecoveryObservation, ctx: ExtensionContext): Promise<void> {

@@ -80,6 +80,21 @@ test("buildRecoveryGuidance injects compact tool-failure guidance", () => {
   assert.match(messages[0]?.content ?? "", /read a fresh snippet/i);
 });
 
+test("buildRecoveryGuidance uses included edit context before asking for another read", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, {
+    toolName: "edit",
+    input: { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] },
+    isError: true,
+    content: "oldText must match exactly\n\nFresh current-file context is included below.",
+  });
+
+  const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+  assert.match(guidance, /use fresh current-file context/i);
+  assert.doesNotMatch(guidance, /read a fresh snippet/i);
+});
+
 test("consumeRecoveryGuidance injects once for an unchanged failure snapshot", () => {
   const state = createRecoveryState();
   recordToolResult(state, { toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT" });

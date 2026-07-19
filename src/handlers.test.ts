@@ -112,6 +112,25 @@ test("handleToolResult does not retry model after preflight already attempted", 
   assert.equal(runtime.recovery.failures.length, 1);
 });
 
+test("handleToolResult returns fresh file context when agent-mode edit recovery is rejected", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-edit-context-"));
+  await writeFile(path.join(root, "file.ts"), "function first() {\n  return 1;\n}\nfunction second() {\n  return 1;\n}\n");
+  const runtime = createRuntime({ modelRecovery: { enabled: true, apiKey: "fake", model: "cheap/model", baseUrl: "https://invalid.test", minConfidence: 0.9 } });
+  runtime.modelRecoveryPreflightAttempts.add("call-1");
+  const event = {
+    toolCallId: "call-1", toolName: "edit", isError: true,
+    input: { path: "file.ts", edits: [{ oldText: "  return 1;", newText: "  return 2;" }] },
+    content: "Found 2 occurrences of edits[0] in file.ts. Each oldText must be unique.",
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result?.isError, true);
+  assert.match(String(result?.content[0]?.text), /Fresh current-file context/);
+  assert.match(String(result?.content[0]?.text), /function first/);
+  assert.match(runtime.recovery.failures[0]?.errorText ?? "", /Fresh current-file context/);
+});
+
 test("handleToolCall records repair warnings in runtime", async () => {
   const runtime = createRuntime();
   const event = { toolName: "edit", input: { edits: { oldText: "a", newText: "b" } } };
