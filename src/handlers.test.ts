@@ -126,9 +126,10 @@ test("handleToolResult returns fresh file context when agent-mode edit recovery 
   const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
 
   assert.equal(result?.isError, true);
-  assert.match(String(result?.content[0]?.text), /Fresh current-file context/);
+  assert.match(String(result?.content[0]?.text), /Current context edits\[0\]/);
   assert.match(String(result?.content[0]?.text), /function first/);
-  assert.match(runtime.recovery.failures[0]?.errorText ?? "", /Fresh current-file context/);
+  assert.doesNotMatch(String(result?.content[0]?.text), /call read|read only/i);
+  assert.match(runtime.recovery.failures[0]?.errorText ?? "", /Current context edits\[0\]/);
 });
 
 test("handleToolCall records repair warnings in runtime", async () => {

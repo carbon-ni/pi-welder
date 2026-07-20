@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import { extractToolErrorText, type ToolResultLike } from "../recovery.ts";
 
 const MAX_FILE_BYTES = 200_000;
-const MAX_CONTEXT_BYTES = 16_000;
-const MAX_EXCERPT_BYTES = 3_500;
-const MAX_CANDIDATES = 8;
-const CONTEXT_LINE_RADIUS = 6;
+const MAX_CONTEXT_BYTES = 4_000;
+const MAX_EXCERPT_BYTES = 1_200;
+const MAX_CANDIDATES = 3;
+const CONTEXT_LINE_RADIUS = 3;
 
 interface EditInput { oldText: string; newText: string }
 
@@ -26,7 +26,6 @@ export interface EditFailureContextPatch {
 interface LocatedSection {
   offset: number;
   endOffset: number;
-  match: "exact" | "whitespace-normalized" | "likely" | "whole-file";
 }
 
 export async function appendEditFailureContext(
@@ -56,26 +55,39 @@ export async function appendEditFailureContext(
   if (sections.length === 0) return undefined;
 
   const selected = sections.slice(0, MAX_CANDIDATES);
-  const blocks: string[] = [errorText, "", "Fresh current-file context is included below. Retry with exact text copied from these blocks; call read only if this context is insufficient."];
+  const contexts = selected
+    .map((section) => ({ ...section, range: excerptRange(current, section.offset, section.endOffset) }))
+    .reduce<Array<ReturnType<typeof excerptRange> & { editIndex: number }>>((merged, context) => {
+      const overlapping = merged.find((candidate) => (
+        candidate.editIndex === context.editIndex
+        && candidate.startOffset <= context.range.endOffset
+        && context.range.startOffset <= candidate.endOffset
+      ));
+      if (!overlapping) {
+        merged.push({ editIndex: context.editIndex, ...context.range });
+        return merged;
+      }
+      overlapping.startOffset = Math.min(overlapping.startOffset, context.range.startOffset);
+      overlapping.endOffset = Math.max(overlapping.endOffset, context.range.endOffset);
+      overlapping.startLine = Math.min(overlapping.startLine, context.range.startLine);
+      overlapping.endLine = Math.max(overlapping.endLine, context.range.endLine);
+      return merged;
+    }, []);
+  const blocks: string[] = [];
   let excerptWasTruncated = false;
 
-  for (let position = 0; position < selected.length; position++) {
-    const section = selected[position]!;
-    const range = excerptRange(current, section.offset, section.endOffset);
-    const rawExcerpt = current.slice(range.startOffset, range.endOffset);
+  for (const context of contexts) {
+    const rawExcerpt = current.slice(context.startOffset, context.endOffset);
     if (Buffer.byteLength(rawExcerpt, "utf8") > MAX_EXCERPT_BYTES) excerptWasTruncated = true;
-    const excerpt = truncateUtf8(rawExcerpt, MAX_EXCERPT_BYTES);
     blocks.push(
       "",
-      `Fresh current-file context for edits[${section.editIndex}] (match: ${matchLabel(section.match)}, lines ${range.startLine}-${range.endLine}, candidate ${position + 1}/${sections.length}):`,
-      "<current_file_context>",
-      excerpt,
-      "</current_file_context>",
+      `Current context edits[${context.editIndex}], lines ${context.startLine}-${context.endLine}:`,
+      truncateUtf8(rawExcerpt, MAX_EXCERPT_BYTES),
     );
   }
 
   const omitted = sections.length - selected.length;
-  if (omitted > 0) blocks.push("", `… ${omitted} additional candidate section(s) omitted.`);
+  if (omitted > 0) blocks.push("", `… ${omitted} more matches.`);
 
   const rendered = truncateUtf8(blocks.join("\n"), MAX_CONTEXT_BYTES);
   return {
@@ -126,7 +138,6 @@ function locateSections(current: string, edit: EditInput): LocatedSection[] {
     return exact.map((offset) => ({
       offset,
       endOffset: offset + edit.oldText.length,
-      match: "exact",
     }));
   }
 
@@ -135,17 +146,16 @@ function locateSections(current: string, edit: EditInput): LocatedSection[] {
     return normalized.map(({ start, end }) => ({
       offset: start,
       endOffset: end,
-      match: "whitespace-normalized",
     }));
   }
 
   const likelyOffset = likelyLineOffset(current, `${edit.oldText}\n${edit.newText}`);
   if (likelyOffset !== undefined) {
-    return [{ offset: likelyOffset, endOffset: likelyOffset, match: "likely" }];
+    return [{ offset: likelyOffset, endOffset: likelyOffset }];
   }
 
   if (Buffer.byteLength(current, "utf8") <= MAX_EXCERPT_BYTES) {
-    return [{ offset: 0, endOffset: current.length, match: "whole-file" }];
+    return [{ offset: 0, endOffset: current.length }];
   }
   return [];
 }
@@ -234,13 +244,6 @@ function lineIndexAt(starts: number[], target: number): number {
     else high = middle - 1;
   }
   return low;
-}
-
-function matchLabel(match: LocatedSection["match"]): string {
-  if (match === "whitespace-normalized") return "whitespace-normalized section";
-  if (match === "likely") return "likely section";
-  if (match === "whole-file") return "whole small file";
-  return "exact candidate";
 }
 
 function truncateUtf8(value: string, maxBytes: number): string {

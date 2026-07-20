@@ -86,13 +86,13 @@ test("buildRecoveryGuidance uses included edit context before asking for another
     toolName: "edit",
     input: { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] },
     isError: true,
-    content: "oldText must match exactly\n\nFresh current-file context is included below.",
+    content: "oldText must match exactly\n\nCurrent context edits[0] lines 1-3 (1/1):\nconst x = 1;",
   });
 
   const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
 
-  assert.match(guidance, /use fresh current-file context/i);
-  assert.doesNotMatch(guidance, /read a fresh snippet/i);
+  assert.match(guidance, /retry with exact oldText from included context/i);
+  assert.doesNotMatch(guidance, /read/i);
 });
 
 test("consumeRecoveryGuidance injects once for an unchanged failure snapshot", () => {

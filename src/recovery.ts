@@ -140,8 +140,8 @@ function firstLine(value: string): string {
 
 function failureHint(errorText: string): string {
   const lower = errorText.toLowerCase();
-  if (lower.includes("fresh current-file context")) {
-    return "use fresh current-file context included in failure, then retry with exact oldText; read only if included context is insufficient.";
+  if (lower.includes("current context edits[")) {
+    return "retry with exact oldText from included context.";
   }
   if (lower.includes("edit_mismatch") || lower.includes("oldtext") || lower.includes("not found")) {
     return "read a fresh snippet, then retry with exact oldText from the current file.";

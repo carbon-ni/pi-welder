@@ -35,9 +35,9 @@ test("appends every exact candidate section for an ambiguous failed edit", async
   const text = patch?.content[0]?.text ?? "";
 
   assert.equal(patch?.isError, true);
-  assert.match(text, /Fresh current-file context for edits\[0\]/);
-  assert.match(text, /candidate 1\/2/);
-  assert.match(text, /candidate 2\/2/);
+  assert.match(text, /Current context edits\[0\], lines \d+-\d+:/);
+  assert.equal(text.match(/Current context edits\[0\]/g)?.length, 1);
+  assert.doesNotMatch(text, /Found 2 occurrences|call read|read only|current_file_context|candidate|match:/i);
   assert.match(text, /function first/);
   assert.match(text, /function second/);
 });
@@ -64,7 +64,7 @@ test("locates a likely current section when oldText no longer matches exactly", 
   ), root);
   const text = patch?.content[0]?.text ?? "";
 
-  assert.match(text, /match: likely section/);
+  assert.match(text, /Current context edits\[0\], lines \d+-\d+:/);
   assert.match(text, /export function calculateTotal\(value: number\)/);
   assert.doesNotMatch(text, /No fresh context found/);
 });
@@ -81,8 +81,9 @@ test("keeps generated failure context bounded", async () => {
   ), root);
   const text = patch?.content[0]?.text ?? "";
 
-  assert.ok(Buffer.byteLength(text, "utf8") <= 16_000);
-  assert.match(text, /additional candidate section\(s\) omitted/);
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4_000);
+  assert.doesNotMatch(text, /Found 100 occurrences/);
+  assert.match(text, /97 more matches/);
 });
 
 test("leaves unrelated, unreadable, and oversized failures unchanged", async () => {
