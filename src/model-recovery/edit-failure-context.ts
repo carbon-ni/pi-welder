@@ -81,7 +81,7 @@ export async function appendEditFailureContext(
     if (Buffer.byteLength(rawExcerpt, "utf8") > MAX_EXCERPT_BYTES) excerptWasTruncated = true;
     blocks.push(
       "",
-      `Current context edits[${context.editIndex}], lines ${context.startLine}-${context.endLine}:`,
+      `Fresh context read from ${target} for edits[${context.editIndex}], lines ${context.startLine}-${context.endLine}:`,
       truncateUtf8(rawExcerpt, MAX_EXCERPT_BYTES),
     );
   }
