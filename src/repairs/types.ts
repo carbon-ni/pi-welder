@@ -13,6 +13,7 @@ export type RepairAction =
   | "relational-default"
   | "nest-edit-fields"
   | "directory-read"
+  | "missing-read-context"
   | "model-locate-old-text";
 
 export interface Repair {

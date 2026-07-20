@@ -322,12 +322,13 @@ test("failing tool_result writes JSONL failure event and updates stats", async (
     await c.handlers["tool_result"]!({ toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT: no such file" }, cx);
 
     const file = path.join(dir, ".pi", "welder-log", "s-result.jsonl");
-    const lines = (await fs.readFile(file, "utf8")).trim().split("\n");
-    const ev = JSON.parse(lines[0]!);
-    assert.equal(ev.eventType, "tool_result");
-    assert.equal(ev.toolName, "read");
-    assert.equal(ev.wasError, true);
-    assert.equal(ev.errorKind, "ENOENT");
+    const events = (await fs.readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const ev = events.find((event) => event.wasError);
+    assert.equal(ev?.eventType, "tool_result");
+    assert.equal(ev?.toolName, "read");
+    assert.equal(ev?.wasError, true);
+    assert.equal(ev?.errorKind, "ENOENT");
+    assert.equal(events.some((event) => event.repairs?.includes("missing-read-context")), true);
 
     await c.commands["welder-stats"]!.handler("", cx);
     assert.match(shown, /failed results : 1/);

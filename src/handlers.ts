@@ -1,7 +1,6 @@
 import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
-import { repairToolResult as repairResult } from "./result-repairs/index.ts";
-import type { DirectoryReadResult } from "./result-repairs/directory-read.ts";
+import { repairToolResult as repairResult, type ResultRepairPatch } from "./result-repairs/index.ts";
 import { preflightEditMismatch, recoverEditMismatch, type ModelRecoveryObservation, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
 import { appendEditFailureContext, type EditFailureContextPatch } from "./model-recovery/edit-failure-context.ts";
 import {
@@ -135,12 +134,15 @@ export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   ctx: ExtensionContext,
-): Promise<DirectoryReadResult | ModelRecoveryPatch | EditFailureContextPatch | undefined> {
+): Promise<ResultRepairPatch | ModelRecoveryPatch | EditFailureContextPatch | undefined> {
   const deterministicRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
   if (deterministicRepair) {
     recordRepairs(runtime.stats, deterministicRepair.repairs);
     await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, deterministicRepair.repairs);
-    recordToolResult(runtime.recovery, { ...event, ...deterministicRepair.patch });
+    const repairedEvent = { ...event, ...deterministicRepair.patch };
+    recordToolResult(runtime.recovery, repairedEvent);
+    const errorText = extractToolErrorText(repairedEvent);
+    if (errorText) await recordFailedToolResult(runtime, event, errorText, ctx);
     return deterministicRepair.patch;
   }
 
@@ -166,6 +168,16 @@ export async function handleToolResult(
   const errorText = extractToolErrorText(event);
   if (!errorText) return failureContext;
 
+  await recordFailedToolResult(runtime, event, errorText, ctx);
+  return failureContext;
+}
+
+async function recordFailedToolResult(
+  runtime: WelderRuntime,
+  event: ToolResultEvent,
+  errorText: string,
+  ctx: ExtensionContext,
+): Promise<void> {
   recordToolFailure(runtime.stats, event.toolName);
   await appendEvent(logDir(ctx), sessionId(ctx), buildToolResultEvent({
     toolName: event.toolName,
@@ -173,7 +185,6 @@ export async function handleToolResult(
     inputKeys: Object.keys(event.input ?? {}),
     errorText,
   })).catch(() => { /* logging never breaks recovery */ });
-  return failureContext;
 }
 
 async function observeModelRecovery(runtime: WelderRuntime, toolName: string, observation: ModelRecoveryObservation, ctx: ExtensionContext): Promise<void> {

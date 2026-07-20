@@ -1,4 +1,5 @@
 import { listDirectoryForRead } from "./directory-read.ts";
+import { appendMissingReadContext } from "./missing-read-context.ts";
 import type { ResultRepair, ResultRepairRule, ToolResultShape } from "./types.ts";
 
 const directoryReadRule: ResultRepairRule = {
@@ -13,8 +14,18 @@ const directoryReadRule: ResultRepairRule = {
   },
 };
 
+const missingReadContextRule: ResultRepairRule = {
+  name: "missing-read-context",
+  async repair(event, cwd) {
+    const patch = await appendMissingReadContext(event, cwd);
+    if (!patch) return undefined;
+    return { patch, repairs: [{ field: "path", action: "missing-read-context" }] };
+  },
+};
+
 export const resultRepairRules: readonly ResultRepairRule[] = Object.freeze([
   directoryReadRule,
+  missingReadContextRule,
 ]);
 
 export async function repairToolResult(

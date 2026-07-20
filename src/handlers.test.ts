@@ -38,6 +38,26 @@ test("handleToolResult converts failed read of directory into listing", async ()
   assert.equal(runtime.stats.repairsByAction.get("directory-read"), 1);
 });
 
+test("handleToolResult enriches ENOENT with folder tree and keeps failure signal", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-missing-"));
+  await mkdir(path.join(root, "src"));
+  await writeFile(path.join(root, "src", "actual.ts"), "x");
+  const runtime = createRuntime();
+  const event = {
+    toolName: "read", input: { path: "src/missing.ts" }, isError: true,
+    content: [{ type: "text", text: "ENOENT: no such file or directory" }], details: {},
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result?.isError, true);
+  assert.match((result?.content?.[0] as { text: string }).text, /actual\.ts/);
+  assert.equal(runtime.recovery.failures.length, 1);
+  assert.equal(runtime.stats.failedToolResults, 1);
+  assert.equal(runtime.stats.failuresByTool.get("read"), 1);
+  assert.equal(runtime.stats.repairsByAction.get("missing-read-context"), 1);
+});
+
 test("handleToolCall repairs input through explicit runtime", async () => {
   const runtime = createRuntime();
   const event = { toolName: "edit", input: { edits: { oldText: "a", newText: "b" } } };
