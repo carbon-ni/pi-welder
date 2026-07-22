@@ -1,4 +1,4 @@
-import type { ContextEvent, ExtensionContext, ToolCallEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import type { ContextEvent, ToolCallEvent, ToolResultEvent, WelderContext } from "./infra/pi/contracts.ts";
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import { repairToolResult as repairResult, type ResultRepairPatch } from "./result-repairs/index.ts";
 import { preflightEditMismatch, recoverEditMismatch, type ModelRecoveryObservation, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
@@ -22,7 +22,7 @@ import {
   recordToolFailure,
   recordValidation,
 } from "./recorder/index.ts";
-import { logDir, modelMeta, sessionId } from "./pi-context.ts";
+import { logDir, modelMeta, sessionId } from "./infra/pi/context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
@@ -35,7 +35,7 @@ interface ToolInputRepair {
 
 export async function handleSessionStart(
   runtime: WelderRuntime,
-  ctx: ExtensionContext,
+  ctx: WelderContext,
   retention = DEFAULT_SESSION_RETENTION,
 ): Promise<void> {
   resetSessionState(runtime);
@@ -45,14 +45,14 @@ export async function handleSessionStart(
   if (ctx.hasUI) ctx.ui.setStatus("welder", "🔧 welder: on");
 }
 
-export async function handleSessionShutdown(ctx: ExtensionContext): Promise<void> {
+export async function handleSessionShutdown(ctx: WelderContext): Promise<void> {
   if (ctx.hasUI) ctx.ui.setStatus("welder", undefined);
 }
 
 export async function handleToolCall(
   runtime: WelderRuntime,
   event: ToolCallEvent,
-  ctx: ExtensionContext,
+  ctx: WelderContext,
 ): Promise<undefined> {
   const input = event.input;
   if (!input || typeof input !== "object") return undefined;
@@ -113,7 +113,7 @@ export function repairStatusText(toolName: string, repairs: Repair[]): string {
 }
 
 async function recordRepairEvent(
-  ctx: ExtensionContext,
+  ctx: WelderContext,
   toolName: string,
   repair: ToolInputRepair,
 ): Promise<void> {
@@ -133,7 +133,7 @@ async function recordRepairEvent(
 export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
-  ctx: ExtensionContext,
+  ctx: WelderContext,
 ): Promise<ResultRepairPatch | ModelRecoveryPatch | EditFailureContextPatch | undefined> {
   const deterministicRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
   if (deterministicRepair) {
@@ -146,7 +146,7 @@ export async function handleToolResult(
     return deterministicRepair.patch;
   }
 
-  const resultToolCallId = (event as ToolResultEvent & { toolCallId?: string }).toolCallId;
+  const resultToolCallId = event.toolCallId;
   const preflightAttempted = resultToolCallId ? runtime.modelRecoveryPreflightAttempts.delete(resultToolCallId) : false;
   const modelRepair = runtime.enabled && !preflightAttempted ? await recoverEditMismatch({
     event,
@@ -176,7 +176,7 @@ async function recordFailedToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   errorText: string,
-  ctx: ExtensionContext,
+  ctx: WelderContext,
 ): Promise<void> {
   recordToolFailure(runtime.stats, event.toolName);
   await appendEvent(logDir(ctx), sessionId(ctx), buildToolResultEvent({
@@ -187,7 +187,7 @@ async function recordFailedToolResult(
   })).catch(() => { /* logging never breaks recovery */ });
 }
 
-async function observeModelRecovery(runtime: WelderRuntime, toolName: string, observation: ModelRecoveryObservation, ctx: ExtensionContext): Promise<void> {
+async function observeModelRecovery(runtime: WelderRuntime, toolName: string, observation: ModelRecoveryObservation, ctx: WelderContext): Promise<void> {
   if (ctx.hasUI) ctx.ui.setStatus("welder", modelRecoveryStatus(observation.stage, observation.outcome, observation.reason));
   await appendEvent(logDir(ctx), sessionId(ctx), buildModelRecoveryEvent({
     toolName, provider: "openrouter", model: runtime.modelRecovery.model, ...observation,
@@ -206,7 +206,7 @@ export function modelRecoveryStatus(stage: string, outcome: string, reason?: str
 }
 
 async function recordResultRepairEvent(
-  ctx: ExtensionContext,
+  ctx: WelderContext,
   toolName: string,
   input: Record<string, unknown>,
   repairs: Repair[],

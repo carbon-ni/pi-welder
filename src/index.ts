@@ -9,7 +9,7 @@
  * Commands: /welder-stats · /welder-status · /welder-reset · /welder-on · /welder-off · /welder-toggle · /welder-log
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionHost } from "./infra/pi/contracts.ts";
 import { registerWelderCommands } from "./commands.ts";
 import { loadWelderConfig } from "./config.ts";
 import {
@@ -22,7 +22,7 @@ import {
 } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionHost) {
   const runtime = createRuntime(loadWelderConfig());
 
   pi.on("session_start", async (_event, ctx) => handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION));

@@ -84,7 +84,7 @@ src/
 ├── handlers.ts      orchestration: runtime ↔ repairs ↔ recorder ↔ recovery
 ├── commands.ts      /welder-* command specs + registration
 ├── runtime.ts       explicit per-session state (no hidden globals)
-├── pi-context.ts    adapters: log dir, session id, model metadata
+├── infra/pi/        local Pi host contracts + context adapters
 ├── fields.ts        field classification (single source of truth for rules)
 ├── infra/           injectable filesystem + model HTTP adapters
 ├── recovery.ts      failed-result tracking + guidance generation
@@ -97,7 +97,8 @@ src/
 - `index` wires `commands`, `handlers`, `runtime`.
 - `handlers` orchestrates lower-level modules; lower-level modules never import `handlers`.
 - `repairs/` stays pure — no Pi APIs, no I/O, no runtime state.
-- `infra/` owns external clients; recovery and result-repair modules accept narrow injected capabilities for deterministic tests.
+- `infra/` owns external clients and local Pi host contracts; recovery and result-repair modules accept narrow injected capabilities for deterministic tests.
+- Pi host types do not leak into handlers or commands; `index.ts` wires the host through consumer-owned structural contracts.
 - `result-repairs/` owns post-execution repair rules; `handlers` only orchestrates and records their signals.
 - Side-effect failures never block tool execution.
 

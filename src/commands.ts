@@ -1,7 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { CommandRegistrar, WelderContext } from "./infra/pi/contracts.ts";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logDir, sessionId } from "./pi-context.ts";
+import { logDir, sessionId } from "./infra/pi/context.ts";
 import {
   buildRecoveryGuidance,
   clearRecovery,
@@ -24,7 +24,7 @@ import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 export interface WelderCommandSpec {
   name: string;
   description: string;
-  handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+  handler: (args: string, ctx: WelderContext) => Promise<void>;
 }
 
 export function parseLimitArg(args: string): number | null {
@@ -229,7 +229,7 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
   ];
 }
 
-export function registerWelderCommands(pi: ExtensionAPI, runtime: WelderRuntime): void {
+export function registerWelderCommands(pi: CommandRegistrar, runtime: WelderRuntime): void {
   for (const spec of welderCommandSpecs(runtime)) {
     pi.registerCommand(spec.name, {
       description: spec.description,
