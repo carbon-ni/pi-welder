@@ -14,6 +14,7 @@ Use this file as the index. Read nested module guides before changing folder mod
 - `src/runtime.ts`: explicit session runtime state. Avoid hidden globals.
 - `src/pi-context.ts`: adapters from Pi context to local values: log dir, session id, model metadata.
 - `src/fields.ts`: field classification constants/predicates used by repair rules.
+- `src/infra/`: external adapters and injectable capability contracts for filesystem and model HTTP access.
 - `src/recovery.ts`: failed-tool-result tracking and recovery guidance generation.
 - `src/repairs/`: pure repair core. See `src/repairs/AGENTS.md`.
 - `src/recorder/`: observability: stats, event schema, JSONL log I/O. See `src/recorder/AGENTS.md`.
@@ -26,6 +27,7 @@ Use this file as the index. Read nested module guides before changing folder mod
 - `repairs` may depend on `fields`; `fields` must not depend on repair/runtime/Pi modules.
 - `runtime` may compose stats and recovery state; do not hide runtime state in module globals.
 - Side-effect modules should not leak Pi APIs into pure modules.
+- External clients belong in `infra`; consumers depend on narrow injectable capabilities and keep Node defaults at the boundary.
 
 ## Design Rules
 

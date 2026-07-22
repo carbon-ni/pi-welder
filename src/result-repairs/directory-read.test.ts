@@ -20,6 +20,28 @@ test("listDirectoryForRead returns sorted files and folders", async () => {
   });
 });
 
+test("listDirectoryForRead uses injected filesystem", async () => {
+  const calls: string[] = [];
+  const result = await listDirectoryForRead("folder", "/cwd", {
+    async stat(target) {
+      calls.push(`stat:${target}`);
+      return { isDirectory: () => true };
+    },
+    async readdir(target) {
+      calls.push(`readdir:${target}`);
+      return [
+        { name: "z-file", isDirectory: () => false },
+        { name: "a-folder", isDirectory: () => true },
+      ];
+    },
+    async readFile() { throw new Error("unused"); },
+    async writeFile() { throw new Error("unused"); },
+  });
+
+  assert.deepEqual(calls, ["stat:/cwd/folder", "readdir:/cwd/folder"]);
+  assert.match(result?.content[0]?.text ?? "", /a-folder\/\nz-file$/);
+});
+
 test("listDirectoryForRead returns undefined for files and missing paths", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-dir-"));
   const file = path.join(root, "file.txt");

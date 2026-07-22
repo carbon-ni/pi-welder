@@ -13,6 +13,23 @@ const mismatch = (target: string, edits: Array<{ oldText: string; newText: strin
   content,
 });
 
+test("appendEditFailureContext uses injected filesystem", async () => {
+  let readPath = "";
+  const patch = await appendEditFailureContext(mismatch(
+    "file.ts",
+    [{ oldText: "return 1", newText: "return 2" }],
+    "Could not find oldText for edits[0]",
+  ), "/workspace", {
+    async readFile(target) { readPath = target; return "return   1"; },
+    async writeFile() { throw new Error("unused"); },
+    async stat() { throw new Error("unused"); },
+    async readdir() { throw new Error("unused"); },
+  });
+
+  assert.equal(readPath, path.resolve("/workspace", "file.ts"));
+  assert.equal(patch?.isError, true);
+});
+
 test("appends every exact candidate section for an ambiguous failed edit", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-edit-context-"));
   const current = [

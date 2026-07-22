@@ -112,6 +112,27 @@ test("maps ordered model candidates to unresolved edits without model-owned inde
   assert.equal(toolInput.edits[1]?.oldText, "const current = 2;");
 });
 
+test("recoverEditMismatch uses injected filesystem", async () => {
+  const writes: Array<{ path: string; content: string }> = [];
+  const reads = ["const value = 1;\n", "const value = 1;\n"];
+
+  const result = await recoverEditMismatch({
+    event: { toolName: "edit", input: { path: "file.ts", edits: [{ oldText: "const value=1;", newText: "const value = 2;" }] }, isError: true, content: failure },
+    cwd: "/workspace",
+    settings: { enabled: true, apiKey: "key", model: "cheap/model", baseUrl: "https://openrouter.test", minConfidence: 0.9 },
+    callModel: async () => ({ decision: "repair", confidence: 1, repairs: [{ oldText: "const value = 1;" }] }),
+    fileSystem: {
+      async readFile() { return reads.shift()!; },
+      async writeFile(target, content) { writes.push({ path: target, content }); },
+      async stat() { throw new Error("unused"); },
+      async readdir() { throw new Error("unused"); },
+    },
+  });
+
+  assert.equal(result?.patch.isError, false);
+  assert.deepEqual(writes, [{ path: path.resolve("/workspace", "file.ts"), content: "const value = 2;\n" }]);
+});
+
 test("recovers edit mismatch using model-located exact text", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-model-recovery-"));
   await writeFile(path.join(root, "file.ts"), "const value = 1; // current\n");

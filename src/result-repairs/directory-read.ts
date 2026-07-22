@@ -1,6 +1,6 @@
-import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { nodeFileSystem, type FileSystem } from "../infra/filesystem.ts";
 
 const MAX_ENTRIES = 200;
 
@@ -19,14 +19,15 @@ export function resolveReadPath(inputPath: string, cwd: string): string {
 export async function listDirectoryForRead(
   inputPath: string,
   cwd: string,
+  fileSystem: FileSystem = nodeFileSystem,
 ): Promise<DirectoryReadResult | undefined> {
   const resolvedPath = resolveReadPath(inputPath, cwd);
 
   try {
-    const info = await stat(resolvedPath);
+    const info = await fileSystem.stat(resolvedPath);
     if (!info.isDirectory()) return undefined;
 
-    const allEntries = await readdir(resolvedPath, { withFileTypes: true });
+    const allEntries = await fileSystem.readdir(resolvedPath);
     const entries = allEntries
       .sort((a, b) => a.name.localeCompare(b.name))
       .slice(0, MAX_ENTRIES)

@@ -1,8 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { nodeFileSystem, type FileSystem } from "../infra/filesystem.ts";
+import { callEditRecoveryModel, type EditRecoveryDecision } from "../infra/openrouter.ts";
 import { extractToolErrorText, type ToolResultLike } from "../recovery.ts";
 import type { Repair } from "../repairs/index.ts";
-import { callEditRecoveryModel, type EditRecoveryDecision } from "./openrouter.ts";
 
 export interface ModelRecoverySettings {
   enabled: boolean;
@@ -30,6 +30,7 @@ interface ModelRecoveryDependencies {
   settings: ModelRecoverySettings;
   signal?: AbortSignal;
   callModel?: (input: { model: string; prompt: string; apiKey: string; baseUrl: string; signal?: AbortSignal }) => Promise<EditRecoveryDecision>;
+  fileSystem?: FileSystem;
   onObservation?: (observation: ModelRecoveryObservation) => Promise<void> | void;
 }
 
@@ -39,7 +40,8 @@ export async function preflightEditMismatch(input: ModelRecoveryDependencies & {
   const edits = parseEdits(input.toolInput.edits);
   if (typeof target !== "string" || edits.length === 0) return undefined;
 
-  const current = await readFile(resolve(input.cwd, target), "utf8").catch(() => undefined);
+  const fileSystem = input.fileSystem ?? nodeFileSystem;
+  const current = await fileSystem.readFile(resolve(input.cwd, target)).catch(() => undefined);
   if (current === undefined || current.length > 200_000) return undefined;
   const pending = edits.map((edit, index) => ({ ...edit, index })).filter(({ oldText, newText }) => countOccurrences(current, oldText) !== 1 && !current.includes(newText));
   if (pending.length === 0) return undefined;
@@ -96,6 +98,7 @@ export async function recoverEditMismatch(input: {
   settings: ModelRecoverySettings;
   signal?: AbortSignal;
   callModel?: (input: { model: string; prompt: string; apiKey: string; baseUrl: string; signal?: AbortSignal }) => Promise<EditRecoveryDecision>;
+  fileSystem?: FileSystem;
   onObservation?: (observation: ModelRecoveryObservation) => Promise<void> | void;
 }): Promise<{ patch: ModelRecoveryPatch; repairs: Repair[] } | undefined> {
   if (input.event.toolName !== "edit" || !input.event.isError) return undefined;
@@ -117,8 +120,9 @@ export async function recoverEditMismatch(input: {
   }
   await input.onObservation?.({ stage: "detected", outcome: "attempting", editCount: edits.length });
 
+  const fileSystem = input.fileSystem ?? nodeFileSystem;
   const absolutePath = resolve(input.cwd, target);
-  const current = await readFile(absolutePath, "utf8").catch(() => undefined);
+  const current = await fileSystem.readFile(absolutePath).catch(() => undefined);
   if (current === undefined || current.length > 200_000) {
     await input.onObservation?.({ stage: "validated", outcome: "rejected", reason: current === undefined ? "file-unreadable" : "file-too-large", fileBytes: current?.length });
     return undefined;
@@ -162,12 +166,12 @@ export async function recoverEditMismatch(input: {
   for (const repair of located) next = next.replace(repair.oldText, edits[repair.index]!.newText);
   if (next === current) return undefined;
 
-  const latest = await readFile(absolutePath, "utf8").catch(() => undefined);
+  const latest = await fileSystem.readFile(absolutePath).catch(() => undefined);
   if (latest !== current) {
     await input.onObservation?.({ stage: "applied", outcome: "rejected", reason: "file-changed-during-recovery" });
     return undefined;
   }
-  await writeFile(absolutePath, next, "utf8");
+  await fileSystem.writeFile(absolutePath, next);
   await input.onObservation?.({ stage: "applied", outcome: "success", confidence: decision.confidence, unresolvedEditCount: located.length });
 
   return {

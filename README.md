@@ -86,6 +86,7 @@ src/
 ├── runtime.ts       explicit per-session state (no hidden globals)
 ├── pi-context.ts    adapters: log dir, session id, model metadata
 ├── fields.ts        field classification (single source of truth for rules)
+├── infra/           injectable filesystem + model HTTP adapters
 ├── recovery.ts      failed-result tracking + guidance generation
 ├── repairs/         PURE input-repair core — engine, rules, helpers, types
 ├── result-repairs/  post-execution repair registry and result adapters
@@ -96,6 +97,7 @@ src/
 - `index` wires `commands`, `handlers`, `runtime`.
 - `handlers` orchestrates lower-level modules; lower-level modules never import `handlers`.
 - `repairs/` stays pure — no Pi APIs, no I/O, no runtime state.
+- `infra/` owns external clients; recovery and result-repair modules accept narrow injected capabilities for deterministic tests.
 - `result-repairs/` owns post-execution repair rules; `handlers` only orchestrates and records their signals.
 - Side-effect failures never block tool execution.
 

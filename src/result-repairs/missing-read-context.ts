@@ -1,6 +1,6 @@
-import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { nodeFileSystem, type FileSystem } from "../infra/filesystem.ts";
 import { resolveReadPath } from "./directory-read.ts";
 import type { ToolResultShape } from "./types.ts";
 
@@ -31,6 +31,7 @@ interface TreeState {
 export async function appendMissingReadContext(
   event: ToolResultShape,
   cwd: string,
+  fileSystem: FileSystem = nodeFileSystem,
 ): Promise<MissingReadContextResult | undefined> {
   if (event.toolName !== "read" || !event.isError) return undefined;
 
@@ -39,12 +40,12 @@ export async function appendMissingReadContext(
   if (typeof requestedPath !== "string" || !isMissingPathError(errorText)) return undefined;
 
   const resolvedPath = resolveReadPath(requestedPath, cwd);
-  if (await pathExists(resolvedPath)) return undefined;
+  if (await pathExists(resolvedPath, fileSystem)) return undefined;
 
-  const treeRoot = await nearestExistingDirectory(path.dirname(resolvedPath));
+  const treeRoot = await nearestExistingDirectory(path.dirname(resolvedPath), fileSystem);
   if (!treeRoot) return undefined;
 
-  const tree = await renderTree(treeRoot);
+  const tree = await renderTree(treeRoot, fileSystem);
   if (!tree) return undefined;
 
   const context = [
@@ -71,12 +72,12 @@ export async function appendMissingReadContext(
   };
 }
 
-async function nearestExistingDirectory(candidate: string): Promise<string | undefined> {
+async function nearestExistingDirectory(candidate: string, fileSystem: FileSystem): Promise<string | undefined> {
   let current = candidate;
 
   while (true) {
     try {
-      if ((await stat(current)).isDirectory()) return current;
+      if ((await fileSystem.stat(current)).isDirectory()) return current;
     } catch {
       // Continue toward the nearest existing ancestor.
     }
@@ -87,9 +88,9 @@ async function nearestExistingDirectory(candidate: string): Promise<string | und
   }
 }
 
-async function renderTree(root: string): Promise<TreeState | undefined> {
+async function renderTree(root: string, fileSystem: FileSystem): Promise<TreeState | undefined> {
   const state: TreeState = { entries: 0, truncated: false, lines: [] };
-  const readable = await appendDirectory(root, "", 1, state);
+  const readable = await appendDirectory(root, "", 1, state, fileSystem);
   return readable ? state : undefined;
 }
 
@@ -98,10 +99,11 @@ async function appendDirectory(
   prefix: string,
   depth: number,
   state: TreeState,
+  fileSystem: FileSystem,
 ): Promise<boolean> {
   let entries;
   try {
-    entries = await readdir(directory, { withFileTypes: true });
+    entries = await fileSystem.readdir(directory);
   } catch {
     return false;
   }
@@ -126,15 +128,15 @@ async function appendDirectory(
     }
 
     const childPrefix = `${prefix}${isLast ? "    " : "│   "}`;
-    await appendDirectory(path.join(directory, entry.name), childPrefix, depth + 1, state);
+    await appendDirectory(path.join(directory, entry.name), childPrefix, depth + 1, state, fileSystem);
   }
 
   return true;
 }
 
-async function pathExists(target: string): Promise<boolean> {
+async function pathExists(target: string, fileSystem: FileSystem): Promise<boolean> {
   try {
-    await stat(target);
+    await fileSystem.stat(target);
     return true;
   } catch {
     return false;

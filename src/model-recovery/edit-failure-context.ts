@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { nodeFileSystem, type FileSystem } from "../infra/filesystem.ts";
 import { extractToolErrorText, type ToolResultLike } from "../recovery.ts";
 
 const MAX_FILE_BYTES = 200_000;
@@ -31,6 +31,7 @@ interface LocatedSection {
 export async function appendEditFailureContext(
   event: ToolResultLike,
   cwd: string,
+  fileSystem: FileSystem = nodeFileSystem,
 ): Promise<EditFailureContextPatch | undefined> {
   if (event.toolName !== "edit" || !event.isError) return undefined;
 
@@ -41,7 +42,7 @@ export async function appendEditFailureContext(
   const edits = parseEdits(event.input?.edits);
   if (typeof target !== "string" || edits.length === 0) return undefined;
 
-  const current = await readFile(resolve(cwd, target), "utf8").catch(() => undefined);
+  const current = await fileSystem.readFile(resolve(cwd, target)).catch(() => undefined);
   if (current === undefined || Buffer.byteLength(current, "utf8") > MAX_FILE_BYTES) return undefined;
 
   const editIndexes = failedEditIndexes(errorText, edits, current);
