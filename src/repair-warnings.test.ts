@@ -46,6 +46,7 @@ test("buildRepairWarnings maps every repair action to a human hint", () => {
     { field: "input.k", action: "rename-aliased-field" },
     { field: "input.l", action: "relational-default" },
     { field: "input.m", action: "nest-edit-fields" },
+    { field: "input.n", action: "merge-edit-anchor" },
   ];
   recordRepairWarnings(state, repairs, "bash");
 
@@ -63,6 +64,7 @@ test("buildRepairWarnings maps every repair action to a human hint", () => {
   assert.match(content, /rename-aliased-field/);
   assert.match(content, /relational-default/);
   assert.match(content, /nest-edit-fields/);
+  assert.match(content, /pass insertion as one complete edit/);
 });
 
 test("consumeRepairWarnings injects once for an unchanged snapshot", () => {

@@ -12,6 +12,7 @@ export type RepairAction =
   | "rename-aliased-field"
   | "relational-default"
   | "nest-edit-fields"
+  | "merge-edit-anchor"
   | "directory-read"
   | "missing-read-context"
   | "model-locate-old-text";

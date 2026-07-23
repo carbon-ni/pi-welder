@@ -72,6 +72,7 @@ const HINT_MAP: ReadonlyMap<RepairAction, string> = new Map([
   ["rename-aliased-field", "use the canonical field name for this tool"],
   ["relational-default", "when passing limit/offset, provide both together"],
   ["nest-edit-fields", "pass edits as an array of {oldText, newText} objects"],
+  ["merge-edit-anchor", "pass insertion as one complete edit instead of an adjacent no-op anchor"],
   ["model-locate-old-text", "read current file text before composing exact replacements"],
 ]);
 

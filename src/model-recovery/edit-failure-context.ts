@@ -6,7 +6,8 @@ const MAX_FILE_BYTES = 200_000;
 const MAX_CONTEXT_BYTES = 4_000;
 const MAX_EXCERPT_BYTES = 1_200;
 const MAX_CANDIDATES = 3;
-const CONTEXT_LINE_RADIUS = 3;
+const TARGET_CONTEXT_LINES = 15;
+const MIN_CONTEXT_BORDER_LINES = 3;
 
 interface EditInput { oldText: string; newText: string }
 
@@ -226,8 +227,13 @@ function excerptRange(content: string, startOffset: number, endOffset: number): 
 
   const firstLineIndex = lineIndexAt(starts, startOffset);
   const lastLineIndex = lineIndexAt(starts, Math.max(startOffset, endOffset - 1));
-  const startLineIndex = Math.max(0, firstLineIndex - CONTEXT_LINE_RADIUS);
-  const endLineIndex = Math.min(lines.length - 1, lastLineIndex + CONTEXT_LINE_RADIUS);
+  const editLineCount = lastLineIndex - firstLineIndex + 1;
+  const borderLineCount = Math.max(
+    MIN_CONTEXT_BORDER_LINES,
+    Math.ceil((TARGET_CONTEXT_LINES - editLineCount) / 2),
+  );
+  const startLineIndex = Math.max(0, firstLineIndex - borderLineCount);
+  const endLineIndex = Math.min(lines.length - 1, lastLineIndex + borderLineCount);
   return {
     startOffset: starts[startLineIndex]!,
     endOffset: endLineIndex + 1 < starts.length ? starts[endLineIndex + 1]! - 1 : content.length,

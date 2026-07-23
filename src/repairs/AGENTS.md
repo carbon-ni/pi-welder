@@ -28,6 +28,7 @@ No filesystem, Pi APIs, UI, clocks, logging, or runtime state belong here.
 - Preserve rule ordering intentionally; earlier repairs shape later repairs.
 - Valid input should pass through unchanged.
 - Content fields must stay content-safe. Do not rewrite command/code/exact text fields unless tests define that behavior.
+- Merge a no-op edit anchor with a following insertion only when the insertion ends with the exact non-empty anchor and both items have no extra fields; otherwise abstain.
 - Repair argument structure and types only; do not infer user intent.
 - Keep `engine.ts` orchestration-focused. Avoid embedding specific repair policy there.
 

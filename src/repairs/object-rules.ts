@@ -74,10 +74,70 @@ const nestEditFieldsRule: ObjectRepairRule = {
   },
 };
 
+interface AnchoredInsertion {
+  oldText: string;
+  newText: string;
+}
+
+function anchoredInsertionAt(edits: unknown[], index: number): AnchoredInsertion | undefined {
+  const anchorEdit = edits[index];
+  const insertionEdit = edits[index + 1];
+  if (!isRecord(anchorEdit) || !isRecord(insertionEdit)) return undefined;
+  if (!hasOnlyKeys(anchorEdit, "oldText", "newText") || !hasOnlyKeys(insertionEdit, "newText")) return undefined;
+
+  const oldText = anchorEdit.oldText;
+  const anchorNewText = anchorEdit.newText;
+  const insertionNewText = insertionEdit.newText;
+  if (typeof oldText !== "string" || oldText.length === 0) return undefined;
+  if (anchorNewText !== oldText || typeof insertionNewText !== "string") return undefined;
+  if (!insertionNewText.endsWith(oldText)) return undefined;
+
+  return { oldText, newText: insertionNewText };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, ...expected: string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => key in value);
+}
+
+export function hasMergeEditAnchorSignal(input: Record<string, unknown>): boolean {
+  const edits = input.edits;
+  if (!Array.isArray(edits)) return false;
+  return edits.some((_, index) => anchoredInsertionAt(edits, index) !== undefined);
+}
+
+const mergeEditAnchorRule: ObjectRepairRule = {
+  action: "merge-edit-anchor",
+  repair(input, ctx) {
+    if (ctx.toolName !== "edit" || !hasMergeEditAnchorSignal(input)) return { result: input, repairs: [] };
+
+    const edits = input.edits as unknown[];
+    const mergedEdits: unknown[] = [];
+    const repairs: Repair[] = [];
+    for (let index = 0; index < edits.length; index++) {
+      const insertion = anchoredInsertionAt(edits, index);
+      if (!insertion) {
+        mergedEdits.push(edits[index]);
+        continue;
+      }
+      mergedEdits.push(insertion);
+      repairs.push({ field: `${ctx.parentPath}.edits[${index}]`, action: "merge-edit-anchor" });
+      index++;
+    }
+
+    return { result: { ...input, edits: mergedEdits }, repairs };
+  },
+};
+
 export const objectRepairRules: readonly ObjectRepairRule[] = Object.freeze([
   renameAliasedFieldRule,
   relationalDefaultRule,
   nestEditFieldsRule,
+  mergeEditAnchorRule,
 ]);
 
 /**

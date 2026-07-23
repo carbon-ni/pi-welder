@@ -264,7 +264,12 @@ test("repairArgs applies relational defaults end-to-end", () => {
 });
 
 test("default object repair rules are explicit and immutable", () => {
-  assert.deepEqual(objectRepairRules.map((rule) => rule.action), ["rename-aliased-field", "relational-default", "nest-edit-fields"]);
+  assert.deepEqual(objectRepairRules.map((rule) => rule.action), [
+    "rename-aliased-field",
+    "relational-default",
+    "nest-edit-fields",
+    "merge-edit-anchor",
+  ]);
   assert.equal(Object.isFrozen(objectRepairRules), true);
 });
 
@@ -373,6 +378,58 @@ test("does not nest when neither oldText nor old_text present", () => {
   );
   assert.deepEqual(result, { path: "a.ts" });
   assert.equal(repairs.length, 0);
+});
+
+// ─── merge-edit-anchor: no-op anchor + insertion ────────────────────────
+
+test("merges a no-op edit anchor with an adjacent insertion missing oldText", () => {
+  const input = {
+    path: "a.ts",
+    edits: [
+      { oldText: "func existing() {", newText: "func existing() {" },
+      { newText: "func inserted() {}\n\nfunc existing() {" },
+    ],
+  };
+
+  const { result, repairs, validation } = repairArgs(input, { toolName: "edit" });
+
+  assert.deepEqual(result, {
+    path: "a.ts",
+    edits: [{
+      oldText: "func existing() {",
+      newText: "func inserted() {}\n\nfunc existing() {",
+    }],
+  });
+  assert.deepEqual(repairs, [{ field: "input.edits[0]", action: "merge-edit-anchor" }]);
+  assert.deepEqual(validation, { checked: true, passed: true, rejected: false });
+});
+
+test("does not infer oldText without the exact no-op anchor contract", () => {
+  const cases = [
+    [
+      { oldText: "anchor", newText: "anchor" },
+      { newText: "insertion without suffix" },
+    ],
+    [
+      { oldText: "anchor", newText: "changed anchor" },
+      { newText: "insertion anchor" },
+    ],
+    [
+      { oldText: "", newText: "" },
+      { newText: "insertion" },
+    ],
+    [
+      { oldText: "anchor", newText: "anchor" },
+      { newText: "insertion anchor", unexpected: true },
+    ],
+  ];
+
+  for (const edits of cases) {
+    const input = { path: "a.ts", edits };
+    const { result, repairs } = repairArgs(input, { toolName: "edit" });
+    assert.equal(result, input);
+    assert.equal(repairs.length, 0);
+  }
 });
 
 // ─── recursion: nested objects and arrays ───────────────────────────────
@@ -517,7 +574,7 @@ test("all repair actions are documented spellings", () => {
     "strip-null", "strip-null-like", "clean-path", "parse-json",
     "wrap-array", "wrap-object-array", "split-string",
     "coerce-boolean", "coerce-number", "strip-extra-props",
-    "rename-aliased-field", "relational-default", "nest-edit-fields", "directory-read",
+    "rename-aliased-field", "relational-default", "nest-edit-fields", "merge-edit-anchor", "directory-read",
   ];
   const { repairs } = repairArgs({
     path: null, limit: null, target: "none", names: "[\"a\"]",

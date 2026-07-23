@@ -86,6 +86,47 @@ test("locates a likely current section when oldText no longer matches exactly", 
   assert.doesNotMatch(text, /No fresh context found/);
 });
 
+test("gives a small edit enough border lines to form a fifteen-line context", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-edit-context-"));
+  await writeFile(path.join(root, "file.ts"), Array.from(
+    { length: 25 },
+    (_, index) => index === 12 ? "target();" : `line ${index + 1}`,
+  ).join("\n"));
+
+  const patch = await appendEditFailureContext(mismatch(
+    "file.ts",
+    [{ oldText: "target();", newText: "replacement();" }],
+    "Could not find a unique oldText for edits[0]. The oldText must match exactly.",
+  ), root);
+  const text = patch?.content[0]?.text ?? "";
+
+  assert.match(text, /lines 6-20:/);
+  assert.match(text, /line 6/);
+  assert.match(text, /line 20/);
+  assert.doesNotMatch(text, /line 5(?:\n|$)/);
+  assert.doesNotMatch(text, /line 21(?:\n|$)/);
+});
+
+test("uses a three-line minimum border for a large edit", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-edit-context-"));
+  const lines = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`);
+  const oldText = lines.slice(8, 17).join("\n");
+  await writeFile(path.join(root, "file.ts"), lines.join("\n"));
+
+  const patch = await appendEditFailureContext(mismatch(
+    "file.ts",
+    [{ oldText, newText: "replacement();" }],
+    "Could not find a unique oldText for edits[0]. The oldText must match exactly.",
+  ), root);
+  const text = patch?.content[0]?.text ?? "";
+
+  assert.match(text, /lines 6-20:/);
+  assert.match(text, /line 6/);
+  assert.match(text, /line 20/);
+  assert.doesNotMatch(text, /line 5(?:\n|$)/);
+  assert.doesNotMatch(text, /line 21(?:\n|$)/);
+});
+
 test("keeps generated failure context bounded", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-edit-context-"));
   const current = Array.from({ length: 100 }, (_, index) => `function item${index}() {\n  return shared;\n}\n`).join("\n");
