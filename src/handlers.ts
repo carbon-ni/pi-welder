@@ -1,7 +1,7 @@
 import type { ContextEvent, ToolCallEvent, ToolResultEvent, WelderContext } from "./infra/pi/contracts.ts";
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import { repairToolResult as repairResult, type ResultRepairPatch } from "./result-repairs/index.ts";
-import { preflightEditMismatch, recoverEditMismatch, type ModelRecoveryObservation, type ModelRecoveryPatch } from "./model-recovery/edit-mismatch.ts";
+import { preflightEditMismatch } from "./model-recovery/edit-mismatch.ts";
 import { appendEditFailureContext, type EditFailureContextPatch } from "./model-recovery/edit-failure-context.ts";
 import {
   consumeRecoveryGuidance,
@@ -16,7 +16,6 @@ import {
   appendEvent,
   buildEvent,
   buildToolResultEvent,
-  buildModelRecoveryEvent,
   pruneOldSessions,
   recordRepairs,
   recordToolFailure,
@@ -70,14 +69,9 @@ export async function handleToolCall(
     const preflight = await preflightEditMismatch({
       toolInput: input as Record<string, unknown>,
       cwd: ctx.cwd,
-      settings: runtime.modelRecovery,
-      onObservation: (observation) => {
-        runtime.modelRecoveryPreflightAttempts.add(event.toolCallId);
-        return observeModelRecovery(runtime, event.toolName, observation, ctx);
-      },
     });
     if (preflight) {
-      const repairs: Repair[] = Array.from({ length: preflight.repairedEdits }, (_, index) => ({ field: `edits[${index}].oldText`, action: "model-locate-old-text" }));
+      const repairs: Repair[] = Array.from({ length: preflight.repairedEdits }, (_, index) => ({ field: `edits[${index}].oldText`, action: "resolve-ambiguous-edit" }));
       recordRepairs(runtime.stats, repairs);
       recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
       await recordResultRepairEvent(ctx, event.toolName, input as Record<string, unknown>, repairs);
@@ -134,7 +128,7 @@ export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   ctx: WelderContext,
-): Promise<ResultRepairPatch | ModelRecoveryPatch | EditFailureContextPatch | undefined> {
+): Promise<ResultRepairPatch | EditFailureContextPatch | undefined> {
   const deterministicRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
   if (deterministicRepair) {
     recordRepairs(runtime.stats, deterministicRepair.repairs);
@@ -144,21 +138,6 @@ export async function handleToolResult(
     const errorText = extractToolErrorText(repairedEvent);
     if (errorText) await recordFailedToolResult(runtime, event, errorText, ctx);
     return deterministicRepair.patch;
-  }
-
-  const resultToolCallId = event.toolCallId;
-  const preflightAttempted = resultToolCallId ? runtime.modelRecoveryPreflightAttempts.delete(resultToolCallId) : false;
-  const modelRepair = runtime.enabled && !preflightAttempted ? await recoverEditMismatch({
-    event,
-    cwd: ctx.cwd,
-    settings: runtime.modelRecovery,
-    onObservation: (observation) => observeModelRecovery(runtime, event.toolName, observation, ctx),
-  }) : undefined;
-  if (modelRepair) {
-    recordRepairs(runtime.stats, modelRepair.repairs);
-    await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, modelRepair.repairs);
-    recordToolResult(runtime.recovery, { ...event, ...modelRepair.patch });
-    return modelRepair.patch;
   }
 
   const failureContext = runtime.enabled
@@ -185,24 +164,6 @@ async function recordFailedToolResult(
     inputKeys: Object.keys(event.input ?? {}),
     errorText,
   })).catch(() => { /* logging never breaks recovery */ });
-}
-
-async function observeModelRecovery(runtime: WelderRuntime, toolName: string, observation: ModelRecoveryObservation, ctx: WelderContext): Promise<void> {
-  if (ctx.hasUI) ctx.ui.setStatus("welder", modelRecoveryStatus(observation.stage, observation.outcome, observation.reason));
-  await appendEvent(logDir(ctx), sessionId(ctx), buildModelRecoveryEvent({
-    toolName, provider: "openrouter", model: runtime.modelRecovery.model, ...observation,
-  })).catch(() => {});
-}
-
-export function modelRecoveryStatus(stage: string, outcome: string, reason?: string): string {
-  if (stage === "detected" && outcome === "attempting") return "🔧 edit: analyzing mismatch…";
-  if (stage === "requested") return "🔧 edit: reasoning…";
-  if ((stage === "decided" && outcome === "repair") || (stage === "validated" && outcome === "accepted")) return "🔧 edit: validating…";
-  if (outcome === "success") return "🔧 edit: recovered";
-  if (outcome === "abstained") return "🔧 edit: model abstained";
-  if (outcome === "failed") return "🔧 edit: recovery unavailable";
-  if (outcome === "rejected" || outcome === "skipped") return `🔧 edit: recovery ${outcome}${reason ? ` — ${reason}` : ""}`;
-  return "🔧 edit: recovery detected";
 }
 
 async function recordResultRepairEvent(

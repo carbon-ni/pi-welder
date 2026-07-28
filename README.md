@@ -86,7 +86,7 @@ src/
 ├── runtime.ts       explicit per-session state (no hidden globals)
 ├── infra/pi/        local Pi host contracts + context adapters
 ├── fields.ts        field classification (single source of truth for rules)
-├── infra/           injectable filesystem + model HTTP adapters
+├── infra/           injectable filesystem adapter + local Pi host contracts
 ├── recovery.ts      failed-result tracking + guidance generation
 ├── repairs/         PURE input-repair core — engine, rules, helpers, types
 ├── result-repairs/  post-execution repair registry and result adapters

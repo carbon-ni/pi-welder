@@ -73,7 +73,7 @@ const HINT_MAP: ReadonlyMap<RepairAction, string> = new Map([
   ["relational-default", "when passing limit/offset, provide both together"],
   ["nest-edit-fields", "pass edits as an array of {oldText, newText} objects"],
   ["merge-edit-anchor", "pass insertion as one complete edit instead of an adjacent no-op anchor"],
-  ["model-locate-old-text", "read current file text before composing exact replacements"],
+  ["resolve-ambiguous-edit", "read current file text before composing exact replacements"],
 ]);
 
 export function buildRepairWarnings(state: RepairWarningState): RepairWarningMessage[] {

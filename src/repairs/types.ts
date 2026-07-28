@@ -15,7 +15,7 @@ export type RepairAction =
   | "merge-edit-anchor"
   | "directory-read"
   | "missing-read-context"
-  | "model-locate-old-text";
+  | "resolve-ambiguous-edit";
 
 export interface Repair {
   field: string;

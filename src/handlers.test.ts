@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { applyRepairedInput, handleContext, handleToolCall, handleToolResult, modelRecoveryStatus, repairStatusText } from "./handlers.ts";
+import { applyRepairedInput, handleContext, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
 
 function ctx(overrides: Partial<any> = {}): any {
@@ -100,12 +100,6 @@ test("repairStatusText summarizes first repairs and remaining count", () => {
   );
 });
 
-test("modelRecoveryStatus exposes progress and terminal outcomes", () => {
-  assert.equal(modelRecoveryStatus("requested", "pending"), "🔧 edit: reasoning…");
-  assert.equal(modelRecoveryStatus("applied", "success"), "🔧 edit: recovered");
-  assert.match(modelRecoveryStatus("validated", "rejected", "ambiguous"), /ambiguous/);
-});
-
 test("handleContext injects recovery guidance through explicit runtime", async () => {
   const runtime = createRuntime();
   await handleToolResult(
@@ -121,24 +115,12 @@ test("handleContext injects recovery guidance through explicit runtime", async (
   assert.match(String(guidance?.content), /read a fresh snippet/);
 });
 
-test("handleToolResult does not retry model after preflight already attempted", async () => {
-  const runtime = createRuntime({ modelRecovery: { enabled: true, apiKey: "fake", model: "cheap/model", baseUrl: "https://invalid.test", minConfidence: 0.9 } });
-  runtime.modelRecoveryPreflightAttempts.add("call-1");
-  const event = { toolCallId: "call-1", toolName: "edit", input: { path: "file.ts", edits: [{ oldText: "x", newText: "y" }] }, isError: true, content: "oldText must match exactly" } as any;
-
-  await handleToolResult(runtime, event, ctx());
-
-  assert.equal(runtime.modelRecoveryPreflightAttempts.has("call-1"), false);
-  assert.equal(runtime.recovery.failures.length, 1);
-});
-
 test("handleToolResult returns fresh file context when agent-mode edit recovery is rejected", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-handler-edit-context-"));
   await writeFile(path.join(root, "file.ts"), "function first() {\n  return 1;\n}\nfunction second() {\n  return 1;\n}\n");
-  const runtime = createRuntime({ modelRecovery: { enabled: true, apiKey: "fake", model: "cheap/model", baseUrl: "https://invalid.test", minConfidence: 0.9 } });
-  runtime.modelRecoveryPreflightAttempts.add("call-1");
+  const runtime = createRuntime();
   const event = {
-    toolCallId: "call-1", toolName: "edit", isError: true,
+    toolName: "edit", isError: true,
     input: { path: "file.ts", edits: [{ oldText: "  return 1;", newText: "  return 2;" }] },
     content: "Found 2 occurrences of edits[0] in file.ts. Each oldText must be unique.",
   } as any;
