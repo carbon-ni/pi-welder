@@ -70,6 +70,7 @@ const HINT_MAP: ReadonlyMap<RepairAction, string> = new Map([
   ["coerce-number", "pass a number instead of a numeric string"],
   ["strip-extra-props", "array items had extra properties stripped; only include allowed fields"],
   ["rename-aliased-field", "use the canonical field name for this tool"],
+  ["rename-edit-item-alias", "use oldText/newText as edit keys"],
   ["relational-default", "when passing limit/offset, provide both together"],
   ["nest-edit-fields", "pass edits as an array of {oldText, newText} objects"],
   ["merge-edit-anchor", "pass insertion as one complete edit instead of an adjacent no-op anchor"],

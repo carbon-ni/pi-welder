@@ -335,13 +335,76 @@ test("nests flat oldText+newText into edits array for edit tool", () => {
   assert.ok(repairs.some((r) => r.action === "nest-edit-fields"));
 });
 
-test("nests flat old_text+new_text (snake_case) into edits array", () => {
+test("nests flat old_text+new_text (snake_case) into edits array with canonical keys", () => {
   const { result, repairs } = repairArgs(
     { path: "a.ts", old_text: "x", new_text: "y" },
     { toolName: "edit" },
   );
-  assert.deepEqual(result, { path: "a.ts", edits: [{ old_text: "x", new_text: "y" }] });
+  assert.deepEqual(result, { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] });
   assert.ok(repairs.some((r) => r.action === "nest-edit-fields"));
+});
+
+test("nests flat old_str+new_str (str_replace convention) with canonical keys", () => {
+  const { result, repairs } = repairArgs(
+    { path: "a.ts", old_str: "x", new_str: "y" },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] });
+  assert.ok(repairs.some((r) => r.action === "nest-edit-fields"));
+});
+
+// ─── rename-edit-item-alias: aliased keys inside edits items ────────────
+
+test("renames old_str/new_str inside edits items to canonical keys", () => {
+  const { result, repairs } = repairArgs({
+    edits: [{ old_str: "a", new_str: "b" }],
+  });
+  assert.deepEqual(result.edits, [{ oldText: "a", newText: "b" }]);
+  assert.ok(repairs.some((r) => r.action === "rename-edit-item-alias"));
+});
+
+test("renames old_string/new_string and old_text/new_text item aliases", () => {
+  const { result } = repairArgs({
+    edits: [
+      { old_string: "a", new_string: "b" },
+      { old_text: "c", new_text: "d" },
+    ],
+  });
+  assert.deepEqual(result.edits, [
+    { oldText: "a", newText: "b" },
+    { oldText: "c", newText: "d" },
+  ]);
+});
+
+test("canonical key wins when both alias and canonical are present", () => {
+  const { result, repairs } = repairArgs({
+    edits: [{ oldText: "keep", newText: "b", old_str: "drop" }],
+  });
+  assert.deepEqual(result.edits, [{ oldText: "keep", newText: "b" }]);
+  assert.ok(repairs.some((r) => r.action === "strip-extra-props"));
+});
+
+test("renamed aliases survive strip-extra-props (order matters)", () => {
+  const { result, repairs } = repairArgs({
+    edits: [{ old_str: "a", new_str: "b", path: "/x", note: "junk" }],
+  });
+  assert.deepEqual(result.edits, [{ oldText: "a", newText: "b" }]);
+  const actions = repairs.map((r) => r.action);
+  assert.ok(actions.includes("rename-edit-item-alias"));
+  assert.ok(actions.includes("strip-extra-props"));
+  assert.ok(actions.indexOf("rename-edit-item-alias") < actions.indexOf("strip-extra-props"));
+});
+
+test("does not rename alias keys outside edits items", () => {
+  const { result, repairs } = repairArgs({ old_str: "a", new_str: "b" });
+  assert.deepEqual(result, { old_str: "a", new_str: "b" });
+  assert.equal(repairs.length, 0);
+});
+
+test("leaves alias-free edits items untouched", () => {
+  const { result, repairs } = repairArgs({ edits: [{ oldText: "a", newText: "b" }] });
+  assert.deepEqual(result.edits, [{ oldText: "a", newText: "b" }]);
+  assert.equal(repairs.length, 0);
 });
 
 test("nests oldText alone when newText is absent", () => {
@@ -521,6 +584,7 @@ test("repair rule order is explicit", () => {
     "array-shape",
     "coerce-boolean",
     "coerce-number",
+    "rename-edit-item-alias",
     "strip-extra-props",
   ]);
 });
@@ -575,6 +639,7 @@ test("all repair actions are documented spellings", () => {
     "wrap-array", "wrap-object-array", "split-string",
     "coerce-boolean", "coerce-number", "strip-extra-props",
     "rename-aliased-field", "relational-default", "nest-edit-fields", "merge-edit-anchor", "directory-read",
+    "rename-edit-item-alias",
   ];
   const { repairs } = repairArgs({
     path: null, limit: null, target: "none", names: "[\"a\"]",

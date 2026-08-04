@@ -1,9 +1,10 @@
+import { EDIT_ITEM_ALIASES } from "../fields.ts";
 import { FIELD_ALIASES } from "../schemas.ts";
 import type { ObjectRepairRule, Repair, RepairResult } from "./types.ts";
 
 /** Flat edit-field spellings the model emits at top level instead of in `edits`. */
-const OLD_TEXT_KEYS = ["oldText", "old_text"] as const;
-const NEW_TEXT_KEYS = ["newText", "new_text"] as const;
+const OLD_TEXT_KEYS = ["oldText", ...(EDIT_ITEM_ALIASES.get("oldText") ?? [])] as const;
+const NEW_TEXT_KEYS = ["newText", ...(EDIT_ITEM_ALIASES.get("newText") ?? [])] as const;
 
 const renameAliasedFieldRule: ObjectRepairRule = {
   action: "rename-aliased-field",
@@ -58,8 +59,8 @@ const nestEditFieldsRule: ObjectRepairRule = {
     if (!oldKey) return { result: input, repairs: [] };
 
     const newKey = NEW_TEXT_KEYS.find((k) => k in input);
-    const edit: Record<string, unknown> = { [oldKey]: input[oldKey] };
-    if (newKey) edit[newKey] = input[newKey];
+    const edit: Record<string, unknown> = { oldText: input[oldKey] };
+    if (newKey) edit.newText = input[newKey];
 
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(input)) {

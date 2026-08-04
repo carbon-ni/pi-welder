@@ -1,5 +1,6 @@
 import {
   ARRAY_ITEM_SCHEMAS,
+  EDIT_ITEM_ALIASES,
   isPathField,
   isArrayField,
   isBooleanField,
@@ -77,6 +78,17 @@ export const repairRules: readonly RepairRule[] = Object.freeze([
     },
   },
   {
+    // Rename aliased edit-item keys (old_str/new_str…) to canonical ones.
+    // Must run BEFORE strip-extra-props, or aliases get stripped as junk.
+    action: "rename-edit-item-alias",
+    repair(value, ctx) {
+      if (ctx.key !== "edits" || !Array.isArray(value)) return unchanged(value);
+      const [renamed, changed] = renameEditItemAliases(value);
+      if (!changed) return unchanged(value);
+      return { value: renamed, repairs: [{ field: ctx.fieldPath, action: "rename-edit-item-alias" }] };
+    },
+  },
+  {
     action: "strip-extra-props",
     repair(value, ctx) {
       if (!Array.isArray(value) || !ARRAY_ITEM_SCHEMAS.has(ctx.key)) return unchanged(value);
@@ -91,6 +103,48 @@ export const repairRules: readonly RepairRule[] = Object.freeze([
 function looksLikeJsonLiteral(value: string): boolean {
   const t = value.trim();
   return t.startsWith("[") || t.startsWith("{");
+}
+
+/**
+ * Rename aliased keys inside edits items to canonical oldText/newText.
+ * Canonical key wins on collision; the alias remains and is dropped later
+ * by strip-extra-props. Returns [renamed, changed].
+ */
+function renameEditItemAliases(items: unknown[]): [unknown[], boolean] {
+  let changed = false;
+  const renamed = items.map((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return item;
+    const obj = item as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    let itemChanged = false;
+    for (const [key, val] of Object.entries(obj)) {
+      const canonical = canonicalEditItemKey(key, obj);
+      if (canonical === undefined) {
+        next[key] = val;
+        continue;
+      }
+      if (canonical in next || canonical in obj) {
+        // Canonical already present (renamed or original) — leave alias for strip-extra-props.
+        next[key] = val;
+        continue;
+      }
+      next[canonical] = val;
+      itemChanged = true;
+    }
+    if (!itemChanged) return item;
+    changed = true;
+    return next;
+  });
+  return [renamed, changed];
+}
+
+/** Canonical key for an alias, or undefined when the key is not an alias. */
+function canonicalEditItemKey(key: string, obj: Record<string, unknown>): string | undefined {
+  for (const [canonical, aliases] of EDIT_ITEM_ALIASES.entries()) {
+    if (!aliases.includes(key)) continue;
+    return canonical in obj ? undefined : canonical;
+  }
+  return undefined;
 }
 
 /**

@@ -145,6 +145,17 @@ export const ARRAY_ITEM_SCHEMAS: ReadonlyMap<string, ReadonlySet<string>> = new 
   ["commands", new Set(["label", "command"])],
 ]);
 
+/**
+ * Aliased spellings of edit-item keys, mined from session validation
+ * failures (old_str/new_str are the Claude str_replace convention).
+ * Only applied inside `edits` array items, where oldText/newText are the
+ * only legal keys — renaming here cannot collide with other tools' fields.
+ */
+export const EDIT_ITEM_ALIASES: ReadonlyMap<string, readonly string[]> = new Map([
+  ["oldText", ["old_str", "old_string", "old_text"]],
+  ["newText", ["new_str", "new_string", "new_text"]],
+]);
+
 /** Strings LLMs emit when they mean "omit this field". */
 export const NULL_LIKE_STRINGS: ReadonlySet<string> = new Set([
   "",
