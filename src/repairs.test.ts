@@ -269,6 +269,7 @@ test("default object repair rules are explicit and immutable", () => {
     "relational-default",
     "nest-edit-fields",
     "merge-edit-anchor",
+    "drop-noop-edit",
   ]);
   assert.equal(Object.isFrozen(objectRepairRules), true);
 });
@@ -443,6 +444,64 @@ test("does not nest when neither oldText nor old_text present", () => {
   assert.equal(repairs.length, 0);
 });
 
+// ─── drop-noop-edit: identical oldText/newText in a multi-edit batch ──
+
+test("drops a no-op edit when the batch has other valid edits", () => {
+  const { result, repairs } = repairArgs(
+    {
+      path: "a.ts",
+      edits: [
+        { oldText: "unchanged", newText: "unchanged" },
+        { oldText: "a", newText: "b" },
+      ],
+    },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result.edits, [{ oldText: "a", newText: "b" }]);
+  assert.deepEqual(repairs, [{ field: "input.edits[0]", action: "drop-noop-edit" }]);
+});
+
+test("keeps a batch unchanged when every edit is a no-op", () => {
+  const input = {
+    path: "a.ts",
+    edits: [
+      { oldText: "x", newText: "x" },
+      { oldText: "y", newText: "y" },
+    ],
+  };
+  const { result, repairs } = repairArgs(input, { toolName: "edit" });
+  assert.deepEqual(result.edits, input.edits);
+  assert.equal(repairs.length, 0);
+});
+
+test("does not drop no-op edits for non-edit tools", () => {
+  const { result, repairs } = repairArgs(
+    { edits: [{ oldText: "x", newText: "x" }, { oldText: "a", newText: "b" }] },
+    { toolName: "read" },
+  );
+  assert.deepEqual(result.edits, [{ oldText: "x", newText: "x" }, { oldText: "a", newText: "b" }]);
+  assert.equal(repairs.length, 0);
+});
+
+test("runs after merge-edit-anchor so anchor+insertion pairs survive", () => {
+  const { result, repairs } = repairArgs(
+    {
+      path: "a.ts",
+      edits: [
+        { oldText: "func existing() {", newText: "func existing() {" },
+        { newText: "func inserted() {}\n\nfunc existing() {" },
+        { oldText: "real", newText: "change" },
+      ],
+    },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result.edits, [
+    { oldText: "func existing() {", newText: "func inserted() {}\n\nfunc existing() {" },
+    { oldText: "real", newText: "change" },
+  ]);
+  assert.deepEqual(repairs.map((r) => r.action), ["merge-edit-anchor"]);
+});
+
 // ─── merge-edit-anchor: no-op anchor + insertion ────────────────────────
 
 test("merges a no-op edit anchor with an adjacent insertion missing oldText", () => {
@@ -468,31 +527,48 @@ test("merges a no-op edit anchor with an adjacent insertion missing oldText", ()
 });
 
 test("does not infer oldText without the exact no-op anchor contract", () => {
+  const untouchedCases = [
+    [
+      { oldText: "anchor", newText: "changed anchor" },
+      { newText: "insertion anchor" },
+    ],
+  ];
+
+  for (const edits of untouchedCases) {
+    const input = { path: "a.ts", edits };
+    const { result, repairs } = repairArgs(input, { toolName: "edit" });
+    assert.equal(result, input);
+    assert.equal(repairs.length, 0);
+  }
+});
+
+test("drops a stray no-op anchor even when the insertion is not mergeable", () => {
   const cases = [
     [
       { oldText: "anchor", newText: "anchor" },
       { newText: "insertion without suffix" },
     ],
     [
-      { oldText: "anchor", newText: "changed anchor" },
-      { newText: "insertion anchor" },
-    ],
-    [
       { oldText: "", newText: "" },
       { newText: "insertion" },
-    ],
-    [
-      { oldText: "anchor", newText: "anchor" },
-      { newText: "insertion anchor", unexpected: true },
     ],
   ];
 
   for (const edits of cases) {
-    const input = { path: "a.ts", edits };
-    const { result, repairs } = repairArgs(input, { toolName: "edit" });
-    assert.equal(result, input);
-    assert.equal(repairs.length, 0);
+    const { result, repairs } = repairArgs({ path: "a.ts", edits }, { toolName: "edit" });
+    assert.deepEqual(result.edits, [edits[1]]);
+    assert.deepEqual(repairs.map((r) => r.action), ["drop-noop-edit"]);
   }
+});
+
+test("stripping junk can unlock the anchor merge before drop-noop runs", () => {
+  const edits = [
+    { oldText: "anchor", newText: "anchor" },
+    { newText: "insertion anchor", unexpected: true },
+  ];
+  const { result, repairs } = repairArgs({ path: "a.ts", edits }, { toolName: "edit" });
+  assert.deepEqual(result.edits, [{ oldText: "anchor", newText: "insertion anchor" }]);
+  assert.deepEqual(repairs.map((r) => r.action), ["strip-extra-props", "merge-edit-anchor"]);
 });
 
 // ─── recursion: nested objects and arrays ───────────────────────────────
@@ -640,6 +716,7 @@ test("all repair actions are documented spellings", () => {
     "coerce-boolean", "coerce-number", "strip-extra-props",
     "rename-aliased-field", "relational-default", "nest-edit-fields", "merge-edit-anchor", "directory-read",
     "rename-edit-item-alias",
+    "drop-noop-edit",
   ];
   const { repairs } = repairArgs({
     path: null, limit: null, target: "none", names: "[\"a\"]",
