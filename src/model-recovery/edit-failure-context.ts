@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { nodeFileSystem, type FileSystem } from "../infra/filesystem.ts";
 import { extractToolErrorText, type ToolResultLike } from "../recovery.ts";
+import { whitespaceNormalizedOffsets } from "./whitespace-normalized.ts";
 
 const MAX_FILE_BYTES = 200_000;
 const MAX_CONTEXT_BYTES = 4_000;
@@ -167,24 +168,6 @@ function occurrenceOffsets(content: string, value: string): number[] {
   const offsets: number[] = [];
   for (let from = 0; (from = content.indexOf(value, from)) !== -1; from += Math.max(1, value.length)) offsets.push(from);
   return offsets;
-}
-
-function whitespaceNormalizedOffsets(content: string, target: string): Array<{ start: number; end: number }> {
-  const compactTarget = target.replace(/\s+/g, "");
-  if (compactTarget.length < 8) return [];
-
-  let compactCurrent = "";
-  const sourceOffsets: number[] = [];
-  for (let index = 0; index < content.length; index++) {
-    if (/\s/.test(content[index]!)) continue;
-    compactCurrent += content[index];
-    sourceOffsets.push(index);
-  }
-
-  return occurrenceOffsets(compactCurrent, compactTarget).map((offset) => ({
-    start: sourceOffsets[offset]!,
-    end: (sourceOffsets[offset + compactTarget.length - 1] ?? sourceOffsets[offset]!) + 1,
-  }));
 }
 
 function likelyLineOffset(current: string, target: string): number | undefined {

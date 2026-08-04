@@ -62,9 +62,10 @@ test("abstains locally when an ambiguous edit still has multiple viable occurren
   assert.deepEqual(toolInput.edits, [{ oldText: "  return 1;", newText: "  return 2;" }]);
 });
 
-test("abstains when an edit's oldText has zero occurrences (cannot be located locally)", async () => {
+test("repairs a zero-occurrence oldText via a unique whitespace-normalized match", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
-  await writeFile(path.join(root, "file.ts"), "const value = 1; // current\n");
+  const current = "const value = 1; // current\n";
+  await writeFile(path.join(root, "file.ts"), current);
   const toolInput = { path: "file.ts", edits: [{ oldText: "const value=1;", newText: "const value = 2;" }] };
 
   const result = await preflightEditMismatch({
@@ -72,7 +73,51 @@ test("abstains when an edit's oldText has zero occurrences (cannot be located lo
     cwd: root,
   });
 
+  assert.equal(result?.repairedEdits, 1);
+  // oldText becomes the verbatim file text; newText stays byte-identical.
+  assert.equal(toolInput.edits[0]?.oldText, "const value = 1;");
+  assert.equal(toolInput.edits[0]?.newText, "const value = 2;");
+  assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), current);
+});
+
+test("repairs zero-occurrence oldText with indentation drift via normalized match", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
+  const current = [
+    "function render() {",
+    "    return uniqToken + suffix;",
+    "}",
+  ].join("\n");
+  await writeFile(path.join(root, "file.ts"), current);
+  const toolInput = { path: "file.ts", edits: [{ oldText: "\treturn uniqToken  +  suffix;", newText: "  return other;" }] };
+
+  const result = await preflightEditMismatch({ toolInput, cwd: root });
+
+  assert.equal(result?.repairedEdits, 1);
+  assert.equal(toolInput.edits[0]?.oldText, "return uniqToken + suffix;");
+  assert.equal(toolInput.edits[0]?.newText, "  return other;");
+});
+
+test("abstains when the whitespace-normalized match is not unique", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
+  const current = "if (a) {\n  return 1;\n}\nif (b) {\n    return 1;\n}\n";
+  await writeFile(path.join(root, "file.ts"), current);
+  const toolInput = { path: "file.ts", edits: [{ oldText: "return  1;", newText: "return 2;" }] };
+
+  const result = await preflightEditMismatch({ toolInput, cwd: root });
+
   assert.equal(result, undefined);
-  assert.equal(toolInput.edits[0]?.oldText, "const value=1;");
-  assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), "const value = 1; // current\n");
+  assert.equal(toolInput.edits[0]?.oldText, "return  1;");
+});
+
+test("abstains when oldText is truly absent (no normalized match)", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
+  const current = "const value = 1; // current\n";
+  await writeFile(path.join(root, "file.ts"), current);
+  const toolInput = { path: "file.ts", edits: [{ oldText: "let somethingElse = true;", newText: "let somethingElse = false;" }] };
+
+  const result = await preflightEditMismatch({ toolInput, cwd: root });
+
+  assert.equal(result, undefined);
+  assert.equal(toolInput.edits[0]?.oldText, "let somethingElse = true;");
+  assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), current);
 });

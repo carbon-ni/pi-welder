@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { nodeFileSystem, type FileSystem } from "../infra/filesystem.ts";
+import { whitespaceNormalizedOffsets } from "./whitespace-normalized.ts";
 
 interface EditInput { oldText: string; newText: string }
 
@@ -34,21 +35,22 @@ export async function preflightEditMismatch(input: {
   const local = resolveAmbiguousEdits(current, edits, pending);
   if (!local) return undefined;
 
-  // Missing edits (zero occurrences) cannot be located locally. Abstain entirely
-  // rather than partially repairing, so the edit fails cleanly and the
-  // deterministic failure-context path can attach fresh file context.
-  const hasMissing = pending.some(({ oldText }) => countOccurrences(current, oldText) === 0);
-  if (hasMissing) return undefined;
+  // Missing edits (zero exact occurrences) get one deterministic retry:
+  // a unique whitespace-normalized match. Edits that stay missing abort the
+  // whole repair, so the edit fails cleanly and the deterministic
+  // failure-context path can attach fresh file context.
+  const missing = resolveMissingEdits(current, edits, pending, local);
+  if (!missing) return undefined;
 
   const repairedEdits = edits.map((edit) => ({ ...edit }));
-  for (const repair of local) {
+  for (const repair of [...local, ...missing]) {
     repairedEdits[repair.index]!.oldText = repair.oldText;
     repairedEdits[repair.index]!.newText = repair.newText;
   }
   if (!haveNonOverlappingUniqueTargets(current, repairedEdits)) return undefined;
 
   input.toolInput.edits = repairedEdits;
-  return { repairedEdits: local.length };
+  return { repairedEdits: local.length + missing.length };
 }
 
 function parseEdits(value: unknown): EditInput[] {
@@ -99,6 +101,41 @@ function resolveAmbiguousEdits(
     });
     if (candidates.length !== 1) return undefined;
     repairs.push(candidates[0]!);
+  }
+  return repairs;
+}
+
+/**
+ * Resolve zero-occurrence oldText values via a unique whitespace-normalized
+ * match. oldText becomes the verbatim file slice; newText stays byte-identical
+ * (content-safe: only the locator changes, never the intended replacement).
+ * Returns undefined when any missing edit cannot be uniquely located.
+ */
+function resolveMissingEdits(
+  current: string,
+  edits: EditInput[],
+  pending: Array<EditInput & { index: number }>,
+  resolved: LocalRepair[],
+): LocalRepair[] | undefined {
+  const missing = pending.filter(({ oldText }) => countOccurrences(current, oldText) === 0);
+  if (missing.length === 0) return [];
+
+  const protectedRanges = [
+    ...edits.flatMap((edit, index) => {
+      const offsets = occurrenceOffsets(current, edit.oldText);
+      return offsets.length === 1 ? [{ start: offsets[0]!, end: offsets[0]! + edit.oldText.length }] : [];
+    }),
+    ...resolved.map(({ range }) => range),
+  ];
+
+  const repairs: LocalRepair[] = [];
+  for (const edit of missing) {
+    const matches = whitespaceNormalizedOffsets(current, edit.oldText)
+      .filter((range) => !protectedRanges.some((range2) => rangesOverlap(range, range2))
+        && !repairs.some(({ range: range2 }) => rangesOverlap(range, range2)));
+    if (matches.length !== 1) return undefined;
+    const range = matches[0]!;
+    repairs.push({ index: edit.index, oldText: current.slice(range.start, range.end), newText: edit.newText, range });
   }
   return repairs;
 }
