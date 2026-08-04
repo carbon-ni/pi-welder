@@ -111,6 +111,13 @@ export function hasMergeEditAnchorSignal(input: Record<string, unknown>): boolea
   return edits.some((_, index) => anchoredInsertionAt(edits, index) !== undefined);
 }
 
+/** True when the batch mixes no-op and real edits, so drop-noop-edit can act. */
+export function hasNoopEditSignal(input: Record<string, unknown>): boolean {
+  const edits = input.edits;
+  if (!Array.isArray(edits)) return false;
+  return edits.some((item) => isNoopEdit(item)) && edits.some((item) => !isNoopEdit(item));
+}
+
 const mergeEditAnchorRule: ObjectRepairRule = {
   action: "merge-edit-anchor",
   repair(input, ctx) {
@@ -134,11 +141,46 @@ const mergeEditAnchorRule: ObjectRepairRule = {
   },
 };
 
+function isNoopEdit(item: unknown): boolean {
+  return isRecord(item)
+    && typeof item.oldText === "string"
+    && typeof item.newText === "string"
+    && item.oldText === item.newText;
+}
+
+/**
+ * Drop no-op edits (oldText === newText) from a multi-edit batch. A no-op
+ * contributes zero changes by definition, so removing it is structural
+ * hygiene — never a content transform. Runs AFTER merge-edit-anchor because
+ * that rule legitimately consumes no-op anchors. When every edit is a no-op,
+ * the batch is kept so the tool fails naturally instead of hitting an empty
+ * edits array.
+ */
+const dropNoopEditsRule: ObjectRepairRule = {
+  action: "drop-noop-edit",
+  repair(input, ctx) {
+    if (ctx.toolName !== "edit" || !Array.isArray(input.edits)) return { result: input, repairs: [] };
+    const edits = input.edits as unknown[];
+    if (edits.some((item) => !isNoopEdit(item))) {
+      const kept = edits.filter((item) => !isNoopEdit(item));
+      const droppedIndexes = edits.flatMap((item, index) => (isNoopEdit(item) ? [index] : []));
+      if (droppedIndexes.length === 0) return { result: input, repairs: [] };
+      const repairs: Repair[] = droppedIndexes.map((index) => ({
+        field: `${ctx.parentPath}.edits[${index}]`,
+        action: "drop-noop-edit",
+      }));
+      return { result: { ...input, edits: kept }, repairs };
+    }
+    return { result: input, repairs: [] };
+  },
+};
+
 export const objectRepairRules: readonly ObjectRepairRule[] = Object.freeze([
   renameAliasedFieldRule,
   relationalDefaultRule,
   nestEditFieldsRule,
   mergeEditAnchorRule,
+  dropNoopEditsRule,
 ]);
 
 /**

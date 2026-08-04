@@ -1,7 +1,7 @@
 import { CONTENT_FIELDS } from "../fields.ts";
 import { hasSchemaRepairSignal, hasUnknownSchemaField, schemaForTool, validateAgainstSchema } from "../schemas.ts";
 import { isNullLikeString } from "./helpers.ts";
-import { hasMergeEditAnchorSignal, objectRepairRules } from "./object-rules.ts";
+import { hasMergeEditAnchorSignal, hasNoopEditSignal, objectRepairRules } from "./object-rules.ts";
 import { repairRules } from "./rules.ts";
 import type {
   ObjectRuleResult,
@@ -26,7 +26,7 @@ export function repairArgs(input: Record<string, unknown>, options: RepairOption
     preValidationIssues.length === 0 &&
     !hasSchemaRepairSignal(resolvedOptions.toolName, input) &&
     !hasUnknownSchemaField(input, schema) &&
-    !(resolvedOptions.toolName === "edit" && hasMergeEditAnchorSignal(input))
+    !(resolvedOptions.toolName === "edit" && (hasMergeEditAnchorSignal(input) || hasNoopEditSignal(input)))
   ) {
     return { result: input, repairs: [], validation };
   }

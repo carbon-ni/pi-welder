@@ -10,6 +10,7 @@ export type RepairAction =
   | "coerce-number"
   | "strip-extra-props"
   | "rename-edit-item-alias"
+  | "drop-noop-edit"
   | "rename-aliased-field"
   | "relational-default"
   | "nest-edit-fields"
