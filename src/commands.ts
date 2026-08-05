@@ -2,6 +2,9 @@ import type { CommandRegistrar, WelderContext } from "./infra/pi/contracts.ts";
 import * as os from "node:os";
 import * as path from "node:path";
 import { logDir, sessionId } from "./infra/pi/context.ts";
+import { loadWelderConfig, saveWelderConfig } from "./config.ts";
+import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
+import { openWelderSettings } from "./infra/pi/settings-ui.ts";
 import {
   buildRecoveryGuidance,
   clearRecovery,
@@ -25,12 +28,6 @@ export interface WelderCommandSpec {
   name: string;
   description: string;
   handler: (args: string, ctx: WelderContext) => Promise<void>;
-}
-
-export function parseLimitArg(args: string): number | null {
-  const raw = args.trim();
-  if (!/^\d+$/.test(raw)) return null;
-  return Number(raw);
 }
 
 export interface MineResult {
@@ -126,34 +123,7 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
         ctx.ui.notify("pi-welder: reset session stats and recovery state", "info");
       },
     },
-    {
-      name: "welder-on",
-      description: "Enable pi-welder repairs",
-      handler: async (_args, ctx) => {
-        runtime.enabled = true;
-        if (ctx.hasUI) ctx.ui.setStatus("welder", "🔧 welder: on");
-        ctx.ui.notify("pi-welder: repairs enabled", "info");
-      },
-    },
-    {
-      name: "welder-off",
-      description: "Disable pi-welder repairs (analytics still tracked in-memory)",
-      handler: async (_args, ctx) => {
-        runtime.enabled = false;
-        if (ctx.hasUI) ctx.ui.setStatus("welder", "🔧 welder: off");
-        ctx.ui.notify("pi-welder: repairs disabled", "info");
-      },
-    },
-    {
-      name: "welder-toggle",
-      description: "Toggle pi-welder repairs on/off",
-      handler: async (_args, ctx) => {
-        runtime.enabled = !runtime.enabled;
-        if (ctx.hasUI) ctx.ui.setStatus("welder", `🔧 welder: ${runtime.enabled ? "on" : "off"}`);
-        ctx.ui.notify(`pi-welder: ${runtime.enabled ? "enabled" : "disabled"}`, "info");
-      },
-    },
-    {
+{
       name: "welder-log",
       description: "Show the path to this session's welder repair log",
       handler: async (_args, ctx) => {
@@ -176,29 +146,37 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
       },
     },
     {
-      name: "welder-guidance-limit",
-      description: "Set max recent tool failures included in recovery guidance (1-10)",
-      handler: async (args, ctx) => {
-        const limit = parseLimitArg(args);
-        if (limit === null) {
-          ctx.ui.notify("pi-welder: expected integer between 1 and 10", "error");
-          return;
-        }
-
-        try {
-          setRecoveryLimit(runtime.recovery, limit);
-          ctx.ui.notify(`pi-welder: guidance limit set to ${limit}`, "info");
-        } catch {
-          ctx.ui.notify("pi-welder: expected integer between 1 and 10", "error");
-        }
-      },
-    },
-    {
       name: "welder-clear",
       description: "Clear pending pi-welder recovery guidance",
       handler: async (_args, ctx) => {
         clearRecovery(runtime.recovery);
         ctx.ui.notify("pi-welder: cleared pending recovery guidance", "info");
+      },
+    },
+    {
+      name: "welder-settings",
+      description: "Toggle pi-welder config options (TUI)",
+      handler: async (_args, ctx) => {
+        if (ctx.mode !== "tui" || !ctx.ui.custom) {
+          ctx.ui.notify("pi-welder: /welder-settings requires interactive TUI mode", "error");
+          return;
+        }
+        let current = loadWelderConfig();
+        const items = welderSettingItems(current);
+        await openWelderSettings(ctx, items, (id, value) => {
+          current = applyWelderSetting(current, id, value);
+          runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
+          try {
+            setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);
+          } catch {
+            /* config is parsed to a valid 1-10 integer */
+          }
+          try {
+            saveWelderConfig(current);
+          } catch {
+            ctx.ui.notify("pi-welder: failed to persist settings", "error");
+          }
+        });
       },
     },
     {

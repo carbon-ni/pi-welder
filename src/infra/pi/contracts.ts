@@ -1,10 +1,27 @@
+export interface WelderComponent {
+  render(width: number): string[];
+  handleInput?(data: string): void;
+  invalidate(): void;
+}
+
 export interface WelderUi {
   notify(message: string, kind?: "info" | "warn" | "error"): void;
   setStatus(key: string, value: string | undefined): void;
+  /** Render a custom keyboard-focused component (TUI only). Adapter-owned. */
+  custom?<T>(
+    factory: (
+      tui: unknown,
+      theme: unknown,
+      keybindings: unknown,
+      done: (result: T) => void,
+    ) => WelderComponent & { dispose?(): void },
+  ): Promise<T>;
 }
 
 export interface WelderContext {
   hasUI: boolean;
+  /** Pi mode: "tui" | "rpc" | "json". Settings UI requires "tui". */
+  mode?: string;
   cwd: string;
   model?: { provider?: string; id?: string };
   sessionManager?: { getSessionId?: () => string };

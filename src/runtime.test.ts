@@ -10,10 +10,15 @@ test("createRuntime starts enabled with fresh stats and recovery", () => {
   assert.equal(runtime.modelRepairReportingEnabled, false);
   assert.equal(runtime.stats.totalToolCalls, 0);
   assert.equal(runtime.recovery.failures.length, 0);
+  assert.equal(runtime.recovery.maxFailures, 3);
 });
 
 test("createRuntime accepts per-model repair reporting feature flag", () => {
   assert.equal(createRuntime({ modelRepairReportingEnabled: true }).modelRepairReportingEnabled, true);
+});
+
+test("createRuntime honors a configured recovery guidance limit", () => {
+  assert.equal(createRuntime({ recoveryGuidanceLimit: 6 }).recovery.maxFailures, 6);
 });
 
 test("resetSessionState resets stats and recovery while preserving guidance limit", () => {

@@ -6,7 +6,7 @@
  * runs. Repairs are transparent and content fields are never touched.
  * Every repair is logged to `.pi/welder-log/<sessionId>.jsonl`.
  *
- * Commands: /welder-stats · /welder-status · /welder-reset · /welder-on · /welder-off · /welder-toggle · /welder-log
+ * Commands: /welder-stats · /welder-reset · /welder-log · /welder-guidance · /welder-failures · /welder-clear · /welder-settings · /welder-mine
  */
 
 import type { ExtensionHost } from "./infra/pi/contracts.ts";

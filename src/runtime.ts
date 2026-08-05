@@ -12,12 +12,13 @@ export interface WelderRuntime {
 
 export interface RuntimeOptions {
   modelRepairReportingEnabled?: boolean;
+  recoveryGuidanceLimit?: number;
 }
 
 export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
   return {
     stats: createStats(),
-    recovery: createRecoveryState(),
+    recovery: createRecoveryState(options.recoveryGuidanceLimit),
     repairWarnings: createRepairWarningState(),
     enabled: true,
     modelRepairReportingEnabled: options.modelRepairReportingEnabled ?? false,

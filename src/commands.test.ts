@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { loadMineEvents, mineFailures, mineSummary, parseLimitArg, parseMineSource, registerWelderCommands, welderCommandSpecs } from "./commands.ts";
+import { loadMineEvents, mineFailures, mineSummary, parseMineSource, registerWelderCommands, welderCommandSpecs } from "./commands.ts";
 import { createRuntime } from "./runtime.ts";
 import { buildToolResultEvent, type FailureEvent, type WelderEvent } from "./recorder/index.ts";
 
@@ -15,25 +15,14 @@ function ctx(overrides: Partial<any> = {}): any {
   };
 }
 
-test("parseLimitArg accepts unsigned integers only", () => {
-  assert.equal(parseLimitArg("3"), 3);
-  assert.equal(parseLimitArg(" 10 "), 10);
-  assert.equal(parseLimitArg(""), null);
-  assert.equal(parseLimitArg("1.5"), null);
-  assert.equal(parseLimitArg("-1"), null);
-});
-
 const expectedCommands = [
   ["welder-stats", "Show pi-welder repair stats for this session"],
   ["welder-reset", "Reset pi-welder session stats and pending recovery guidance"],
-  ["welder-on", "Enable pi-welder repairs"],
-  ["welder-off", "Disable pi-welder repairs (analytics still tracked in-memory)"],
-  ["welder-toggle", "Toggle pi-welder repairs on/off"],
   ["welder-log", "Show the path to this session's welder repair log"],
   ["welder-guidance", "Show current pi-welder recovery guidance from recent tool failures"],
   ["welder-failures", "Show pending pi-welder tool failures without recovery hints"],
-  ["welder-guidance-limit", "Set max recent tool failures included in recovery guidance (1-10)"],
   ["welder-clear", "Clear pending pi-welder recovery guidance"],
+  ["welder-settings", "Toggle pi-welder config options (TUI)"],
   ["welder-mine", "Aggregate tool failures across sessions. Args: pi | welder | all (default all)"],
 ];
 
@@ -50,6 +39,15 @@ test("registerWelderCommands registers all command handlers", () => {
   registerWelderCommands({ registerCommand: (name: string, def: unknown) => { commands[name] = def; } } as any, createRuntime());
 
   assert.deepEqual(Object.keys(commands), expectedCommands.map(([name]) => name));
+});
+
+test("welder-settings notifies an error outside TUI mode", async () => {
+  const runtime = createRuntime();
+  let notified: { msg: string; kind: string } | null = null;
+  const spec = welderCommandSpecs(runtime).find((s) => s.name === "welder-settings")!;
+  await spec.handler("", { mode: undefined, ui: { notify: (msg: string, kind: string) => { notified = { msg, kind }; } } } as any);
+  assert.equal(notified!.kind, "error");
+  assert.match(notified!.msg, /TUI/);
 });
 
 // ─── mineFailures ───────────────────────────────────────────────────────

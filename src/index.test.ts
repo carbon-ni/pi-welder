@@ -43,7 +43,7 @@ test("factory registers tool_call/tool_result/context + session handlers and all
   assert.ok(c.handlers["tool_result"], "tool_result handler registered");
   assert.ok(c.handlers["context"], "context handler registered");
   assert.ok(c.handlers["session_start"], "session_start handler registered");
-  for (const cmd of ["welder-stats", "welder-reset", "welder-on", "welder-off", "welder-toggle", "welder-log", "welder-guidance", "welder-failures", "welder-guidance-limit", "welder-clear"]) {
+  for (const cmd of ["welder-stats", "welder-reset", "welder-log", "welder-guidance", "welder-failures", "welder-clear", "welder-settings"]) {
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
 });
@@ -106,22 +106,6 @@ test("repair writes one JSONL line to the session log", async () => {
   }
 });
 
-test("welder-off disables repair application; welder-on re-enables", async () => {
-  const c = loadExtension();
-  const cx = ctx();
-  await c.handlers["session_start"]!({}, cx);
-  await c.commands["welder-off"]!.handler("", cx);
-
-  const event = { toolName: "edit", toolCallId: "1", input: { edits: { oldText: "x", newText: "y" } } };
-  await c.handlers["tool_call"]!(event, cx);
-  assert.deepEqual(event.input.edits, { oldText: "x", newText: "y" }, "not wrapped while off");
-
-  await c.commands["welder-on"]!.handler("", cx);
-  const event2 = { toolName: "edit", toolCallId: "2", input: { edits: { oldText: "x", newText: "y" } } };
-  await c.handlers["tool_call"]!(event2, cx);
-  assert.deepEqual(event2.input.edits, [{ oldText: "x", newText: "y" }], "wrapped after re-enable");
-});
-
 test("welder-stats surfaces repairs counted in-session", async () => {
   const c = loadExtension();
   let shown = "";
@@ -133,12 +117,11 @@ test("welder-stats surfaces repairs counted in-session", async () => {
   assert.match(shown, /strip-null/);
 });
 
-test("welder-reset clears stats and recovery without changing enabled state", async () => {
+test("welder-reset clears stats and recovery", async () => {
   const c = loadExtension();
   let shown = "";
   const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
   await c.handlers["session_start"]!({}, cx);
-  await c.commands["welder-off"]!.handler("", cx);
   await c.handlers["tool_call"]!({ toolName: "read", toolCallId: "1", input: { paths: '["a"]' } }, cx);
   await c.handlers["tool_result"]!({ toolName: "read", input: {}, isError: true, content: "ENOENT" }, cx);
 
@@ -276,36 +259,6 @@ test("welder-clear removes pending recovery guidance", async () => {
   const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
   assert.equal(out, undefined);
   assert.match(shown, /cleared/);
-});
-
-test("welder-guidance-limit updates max recent failures", async () => {
-  const c = loadExtension();
-  let shown = "";
-  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
-  await c.handlers["session_start"]!({}, cx);
-
-  await c.commands["welder-guidance-limit"]!.handler("2", cx);
-  await c.handlers["tool_result"]!({ toolName: "one", input: {}, isError: true, content: "1" }, cx);
-  await c.handlers["tool_result"]!({ toolName: "two", input: {}, isError: true, content: "2" }, cx);
-  await c.handlers["tool_result"]!({ toolName: "three", input: {}, isError: true, content: "3" }, cx);
-
-  const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
-  const content = out.messages[1].content;
-  assert.match(shown, /guidance limit set to 2/);
-  assert.doesNotMatch(content, /one failed/);
-  assert.match(content, /two failed/);
-  assert.match(content, /three failed/);
-});
-
-test("welder-guidance-limit rejects invalid values", async () => {
-  const c = loadExtension();
-  let shown = "";
-  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
-  await c.handlers["session_start"]!({}, cx);
-
-  await c.commands["welder-guidance-limit"]!.handler("0", cx);
-
-  assert.match(shown, /expected integer between 1 and 10/);
 });
 
 test("failing tool_result writes JSONL failure event and updates stats", async () => {

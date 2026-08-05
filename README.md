@@ -54,14 +54,12 @@ Valid input passes through unchanged. Field classification is centralized in [`s
 | Command | Purpose |
 | --- | --- |
 | `/welder-stats` | Repair stats for this session |
-| `/welder-status` | Runtime status |
-| `/welder-on` · `/welder-off` · `/welder-toggle` | Enable / disable / toggle repairs (analytics still tracked) |
 | `/welder-reset` | Reset session stats and pending recovery |
 | `/welder-log` | Path to this session's JSONL log |
 | `/welder-guidance` | Show current recovery guidance |
 | `/welder-failures` | Show pending failures without hints |
-| `/welder-guidance-limit <1-10>` | Cap failures included in guidance |
 | `/welder-clear` | Clear pending recovery guidance |
+| `/welder-settings` | Toggle config options (TUI only; persists to `~/.pi/agent/welder.json`) |
 | `/welder-mine [pi\|welder\|all]` | Aggregate failures across sessions and write a ranked report |
 
 `/welder-mine` reads either welder's own logs, Pi's native session JSONL (`~/.pi/agent/sessions`), or both — so you can mine a week of real usage and let the data tell you the next rule to write.
