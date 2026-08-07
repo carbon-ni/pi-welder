@@ -23,7 +23,6 @@ const expectedCommands = [
   ["welder-failures", "Show pending pi-welder tool failures without recovery hints"],
   ["welder-clear", "Clear pending pi-welder recovery guidance"],
   ["welder-settings", "Toggle pi-welder config options (TUI)"],
-  ["welder-mine", "Aggregate tool failures across sessions. Args: pi | welder | all (default all)"],
 ];
 
 test("welderCommandSpecs document command names and descriptions", () => {

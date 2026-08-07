@@ -21,7 +21,7 @@ export function welderSettingItems(config: WelderConfig): WelderSettingItem[] {
     {
       id: "modelRepairReportingEnabled",
       label: "Per-model repair reporting",
-      description: "Break /welder-mine repair stats down by model",
+      description: "Break mined repair stats down by model",
       currentValue: config.modelRepairReportingEnabled ? "on" : "off",
       values: [...ON_OFF],
     },

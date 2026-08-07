@@ -179,31 +179,6 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
         });
       },
     },
-    {
-      name: "welder-mine",
-      description: "Aggregate tool failures across sessions. Args: pi | welder | all (default all)",
-      handler: async (args, ctx) => {
-        try {
-          const source = parseMineSource(args);
-          const events = await loadMineEvents(source, {
-            welderLogDir: logDir(ctx),
-            piSessionsDir: PI_SESSIONS_DIR,
-            loadWelder: loadAllEvents,
-            loadPi: loadPiSessionEvents,
-          });
-          const result = await mineFailures(
-            events,
-            logDir(ctx),
-            writeFailureReport,
-            source,
-            runtime.modelRepairReportingEnabled,
-          );
-          ctx.ui.notify(mineSummary(result), "info");
-        } catch (err) {
-          ctx.ui.notify(`pi-welder: failed to mine failures: ${String(err)}`, "error");
-        }
-      },
-    },
   ];
 }
 

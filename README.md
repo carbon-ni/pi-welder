@@ -60,9 +60,6 @@ Valid input passes through unchanged. Field classification is centralized in [`s
 | `/welder-failures` | Show pending failures without hints |
 | `/welder-clear` | Clear pending recovery guidance |
 | `/welder-settings` | Toggle config options (TUI only; persists to `~/.pi/agent/welder.json`) |
-| `/welder-mine [pi\|welder\|all]` | Aggregate failures across sessions and write a ranked report |
-
-`/welder-mine` reads either welder's own logs, Pi's native session JSONL (`~/.pi/agent/sessions`), or both — so you can mine a week of real usage and let the data tell you the next rule to write.
 
 Per-model repair ranking is opt-in because it can increase report cardinality. Configure it in `~/.pi/agent/welder.json`:
 
