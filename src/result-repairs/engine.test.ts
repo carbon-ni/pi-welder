@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,22 @@ test("repairToolResult returns a uniform directory-read repair signal", async ()
 
   assert.equal(repair?.patch.isError, false);
   assert.deepEqual(repair?.repairs, [{ field: "path", action: "directory-read" }]);
+});
+
+test("repairToolResult recovers a read offset past EOF", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-result-"));
+  await writeFile(path.join(root, "notes.txt"), "one\ntwo\nthree");
+
+  const repair = await repairToolResult({
+    toolName: "read",
+    input: { path: "notes.txt", offset: 5, limit: 2 },
+    isError: true,
+    content: "Offset 5 is beyond end of file (3 lines total)",
+  }, root);
+
+  assert.equal(repair?.patch.isError, false);
+  assert.deepEqual(repair?.repairs, [{ field: "offset", action: "read-offset-context" }]);
+  assert.match(repair?.patch.content[0]?.text ?? "", /two\nthree$/);
 });
 
 test("repairToolResult adds nearest-folder context to missing reads", async () => {

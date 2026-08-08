@@ -1,5 +1,6 @@
 import { listDirectoryForRead } from "./directory-read.ts";
 import { appendMissingReadContext } from "./missing-read-context.ts";
+import { recoverReadOffsetContext } from "./read-offset-context.ts";
 import type { ResultRepair, ResultRepairRule, ToolResultShape } from "./types.ts";
 
 const directoryReadRule: ResultRepairRule = {
@@ -14,6 +15,15 @@ const directoryReadRule: ResultRepairRule = {
   },
 };
 
+const readOffsetContextRule: ResultRepairRule = {
+  name: "read-offset-context",
+  async repair(event, cwd) {
+    const patch = await recoverReadOffsetContext(event, cwd);
+    if (!patch) return undefined;
+    return { patch, repairs: [{ field: "offset", action: "read-offset-context" }] };
+  },
+};
+
 const missingReadContextRule: ResultRepairRule = {
   name: "missing-read-context",
   async repair(event, cwd) {
@@ -25,6 +35,7 @@ const missingReadContextRule: ResultRepairRule = {
 
 export const resultRepairRules: readonly ResultRepairRule[] = Object.freeze([
   directoryReadRule,
+  readOffsetContextRule,
   missingReadContextRule,
 ]);
 

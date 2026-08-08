@@ -38,6 +38,24 @@ test("handleToolResult converts failed read of directory into listing", async ()
   assert.equal(runtime.stats.repairsByAction.get("directory-read"), 1);
 });
 
+test("handleToolResult recovers a read offset past EOF", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-offset-"));
+  await writeFile(path.join(root, "notes.txt"), "one\ntwo\nthree");
+  const runtime = createRuntime();
+  const event = {
+    toolName: "read", input: { path: "notes.txt", offset: 5, limit: 2 }, isError: true,
+    content: [{ type: "text", text: "Offset 5 is beyond end of file (3 lines total)" }], details: {},
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result?.isError, false);
+  assert.match((result?.content?.[0] as { text: string }).text, /two\nthree$/);
+  assert.equal(runtime.recovery.failures.length, 0);
+  assert.equal(runtime.stats.failedToolResults, 0);
+  assert.equal(runtime.stats.repairsByAction.get("read-offset-context"), 1);
+});
+
 test("handleToolResult enriches ENOENT with folder tree and keeps failure signal", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-handler-missing-"));
   await mkdir(path.join(root, "src"));
