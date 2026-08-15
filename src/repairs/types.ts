@@ -56,12 +56,15 @@ export interface RepairOptions {
   extraRules?: readonly RepairRule[];
   objectRules?: readonly ObjectRepairRule[];
   extraObjectRules?: readonly ObjectRepairRule[];
+  /** Repair names to skip; see REPAIR_NAMES for the canonical list. */
+  disabledActions?: ReadonlySet<string>;
 }
 
 export interface ResolvedRepairOptions {
   toolName?: string;
   rules: readonly RepairRule[];
   objectRules: readonly ObjectRepairRule[];
+  disabledActions: ReadonlySet<string>;
 }
 
 export interface RepairRule {

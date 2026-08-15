@@ -45,10 +45,14 @@ export function repairArgs(input: Record<string, unknown>, options: RepairOption
 }
 
 function resolveRepairOptions(options: RepairOptions): ResolvedRepairOptions {
+  const disabled = options.disabledActions ?? new Set<string>();
+  const notDisabled = <T extends { action: string }>(rule: T) => !disabled.has(rule.action);
   return {
     toolName: options.toolName,
-    rules: options.rules ?? [...repairRules, ...(options.extraRules ?? [])],
-    objectRules: options.objectRules ?? [...(options.extraObjectRules ?? []), ...objectRepairRules],
+    disabledActions: disabled,
+    rules: (options.rules ?? [...repairRules, ...(options.extraRules ?? [])]).filter(notDisabled),
+    objectRules: (options.objectRules ?? [...(options.extraObjectRules ?? []), ...objectRepairRules])
+      .filter(notDisabled),
   };
 }
 
@@ -87,13 +91,13 @@ function repairObjectFields(
     }
 
     // strip-null — omit null optional fields entirely.
-    if (value === null) {
+    if (value === null && !options.disabledActions.has("strip-null")) {
       repairs.push({ field: fieldPath, action: "strip-null" });
       continue;
     }
 
     // strip-null-like — omit "null"/"none"/"n/a" string spellings.
-    if (isNullLikeString(value)) {
+    if (isNullLikeString(value) && !options.disabledActions.has("strip-null-like")) {
       repairs.push({ field: fieldPath, action: "strip-null-like" });
       continue;
     }

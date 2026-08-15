@@ -5,6 +5,8 @@ import { join } from "node:path";
 export interface WelderConfig {
   modelRepairReportingEnabled: boolean;
   recoveryGuidanceLimit: number;
+  repairsEnabled: boolean;
+  disabledRepairs: string[];
 }
 
 export const WELDER_CONFIG_PATH = join(homedir(), ".pi", "agent", "welder.json");
@@ -18,11 +20,18 @@ function parseRecoveryGuidanceLimit(raw: unknown): number {
   return raw;
 }
 
+function parseDisabledRepairs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((name): name is string => typeof name === "string");
+}
+
 export function parseWelderConfig(value: unknown): WelderConfig {
   const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
   return {
     modelRepairReportingEnabled: input.modelRepairReportingEnabled === true,
     recoveryGuidanceLimit: parseRecoveryGuidanceLimit(input.recoveryGuidanceLimit),
+    repairsEnabled: input.repairsEnabled !== false,
+    disabledRepairs: parseDisabledRepairs(input.disabledRepairs),
   };
 }
 

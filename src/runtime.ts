@@ -7,12 +7,15 @@ export interface WelderRuntime {
   recovery: RecoveryState;
   repairWarnings: RepairWarningState;
   enabled: boolean;
+  disabledRepairs: ReadonlySet<string>;
   modelRepairReportingEnabled: boolean;
 }
 
 export interface RuntimeOptions {
   modelRepairReportingEnabled?: boolean;
   recoveryGuidanceLimit?: number;
+  repairsEnabled?: boolean;
+  disabledRepairs?: readonly string[];
 }
 
 export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
@@ -20,7 +23,8 @@ export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
     stats: createStats(),
     recovery: createRecoveryState(options.recoveryGuidanceLimit),
     repairWarnings: createRepairWarningState(),
-    enabled: true,
+    enabled: options.repairsEnabled ?? true,
+    disabledRepairs: new Set(options.disabledRepairs ?? []),
     modelRepairReportingEnabled: options.modelRepairReportingEnabled ?? false,
   };
 }

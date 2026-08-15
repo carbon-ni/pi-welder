@@ -113,6 +113,44 @@ test("wraps bare string into array for array fields", () => {
   assert.ok(repairs.some((r) => r.action === "wrap-array"));
 });
 
+// ─── disabled repairs: per-name opt-out ─────────────────────────────
+
+test("disabled parse-json leaves stringified JSON untouched", () => {
+  const { result, repairs } = repairArgs({ paths: '["a.ts"]' }, { disabledActions: new Set(["parse-json"]) });
+  assert.equal(result.paths, '["a.ts"]');
+  assert.equal(repairs.length, 0);
+});
+
+test("disabled array-shape leaves bare scalars unwrapped", () => {
+  const { result, repairs } = repairArgs({ function_names: "main" }, { disabledActions: new Set(["array-shape"]) });
+  assert.equal(result.function_names, "main");
+  assert.equal(repairs.length, 0);
+});
+
+test("disabled strip-null keeps null fields as-is", () => {
+  const { result, repairs } = repairArgs({ tag: null }, { disabledActions: new Set(["strip-null"]) });
+  assert.equal(result.tag, null);
+  assert.equal(repairs.length, 0);
+});
+
+test("disabled object rules are skipped (nest-edit-fields)", () => {
+  const { repairs } = repairArgs(
+    { edits: { oldText: "a", newText: "b" } },
+    { disabledActions: new Set(["nest-edit-fields", "array-shape"]) },
+  );
+  assert.equal(repairs.length, 0);
+});
+
+test("disabled repairs do not affect other rules", () => {
+  const { result, repairs } = repairArgs(
+    { tag: null, options: '{"a":1}' },
+    { disabledActions: new Set(["strip-null"]) },
+  );
+  assert.equal(result.tag, null);
+  assert.deepEqual(result.options, { a: 1 });
+  assert.ok(repairs.some((r) => r.action === "parse-json"));
+});
+
 test("wraps bare number into array for array fields", () => {
   const { result } = repairArgs({ ids: 42 });
   assert.deepEqual(result.ids, [42]);

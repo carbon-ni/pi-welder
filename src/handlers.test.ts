@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { applyRepairedInput, handleContext, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
+import { applyRepairedInput, handleContext, handleSessionStart, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
 
 function ctx(overrides: Partial<any> = {}): any {
@@ -97,6 +97,70 @@ test("handleToolCall tracks repairs without mutating input when disabled", async
   assert.deepEqual(event.input.edits, { oldText: "a", newText: "b" });
   assert.equal(runtime.stats.totalToolCalls, 1);
   assert.equal(runtime.stats.repairedToolCalls, 1);
+});
+
+test("handleSessionStart preserves a configured repairs-off runtime", async () => {
+  const runtime = createRuntime({ repairsEnabled: false });
+  const statuses: (string | undefined)[] = [];
+
+  await handleSessionStart(runtime, ctx({ hasUI: true, ui: { notify: () => {}, setStatus: (_: string, v?: string) => statuses.push(v) } }), 0);
+
+  assert.equal(runtime.enabled, false);
+  assert.equal(statuses[0], "🔧 welder: on (repairs off)");
+});
+
+test("handleToolCall skips per-name disabled repairs (parse-json)", async () => {
+  const runtime = createRuntime();
+  runtime.disabledRepairs = new Set(["parse-json"]);
+  const event = { toolName: "bash", input: { options: '{"a":1}' } };
+
+  await handleToolCall(runtime, event as any, ctx());
+
+  assert.equal(event.input.options, '{"a":1}');
+});
+
+test("handleToolCall skips ambiguous-edit preflight when resolve-ambiguous-edit is disabled", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-"));
+  const current = [
+    "interface First {",
+    "  fileBytes?: number;",
+    "}",
+    "",
+    "interface Second {",
+    "  fileBytes?: number;",
+    "}",
+    "",
+    "interface AfterSecond {}",
+    "",
+  ].join("\n");
+  await writeFile(path.join(root, "file.ts"), current);
+  const ambiguous = "  fileBytes?: number;\n}";
+  const edits = [
+    { oldText: ambiguous, newText: "  fileBytes?: number;\n  candidateCount?: number;\n}" },
+    { oldText: "  fileBytes?: number;\n}\n\ninterface AfterSecond", newText: "  fileBytes?: number;\n  candidateCount?: number;\n}\n\ninterface AfterSecond" },
+  ];
+  const runtime = createRuntime();
+  runtime.disabledRepairs = new Set(["resolve-ambiguous-edit"]);
+  const event = { toolName: "edit", input: { path: "file.ts", edits: edits.map((e) => ({ ...e })) } };
+
+  await handleToolCall(runtime, event as any, ctx({ cwd: root }));
+
+  assert.deepEqual(event.input.edits, edits);
+});
+
+test("handleToolResult skips disabled directory-read repair", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-"));
+  await mkdir(path.join(root, "folder"));
+  const runtime = createRuntime();
+  runtime.disabledRepairs = new Set(["directory-read"]);
+  const event = {
+    toolName: "read", input: { path: root }, isError: true,
+    content: [{ type: "text", text: "EISDIR" }], details: {},
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result, undefined);
 });
 
 test("applyRepairedInput mutates original object in place", () => {

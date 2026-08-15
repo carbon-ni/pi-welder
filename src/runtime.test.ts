@@ -21,6 +21,17 @@ test("createRuntime honors a configured recovery guidance limit", () => {
   assert.equal(createRuntime({ recoveryGuidanceLimit: 6 }).recovery.maxFailures, 6);
 });
 
+test("createRuntime starts with repairs disabled when configured off", () => {
+  assert.equal(createRuntime({ repairsEnabled: false }).enabled, false);
+});
+
+test("createRuntime seeds disabled repair names as a set", () => {
+  const runtime = createRuntime({ disabledRepairs: ["parse-json", "directory-read"] });
+  assert.equal(runtime.disabledRepairs.has("parse-json"), true);
+  assert.equal(runtime.disabledRepairs.has("directory-read"), true);
+  assert.equal(runtime.disabledRepairs.has("strip-null"), false);
+});
+
 test("resetSessionState resets stats and recovery while preserving guidance limit", () => {
   const runtime = createRuntime();
   runtime.enabled = false;

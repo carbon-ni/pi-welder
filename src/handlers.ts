@@ -1,6 +1,6 @@
 import type { ContextEvent, ToolCallEvent, ToolResultEvent, WelderContext } from "./infra/pi/contracts.ts";
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
-import { repairToolResult as repairResult, type ResultRepairPatch } from "./result-repairs/index.ts";
+import { repairToolResult as repairResult, resultRepairRules, type ResultRepairPatch } from "./result-repairs/index.ts";
 import { preflightEditMismatch } from "./model-recovery/edit-mismatch.ts";
 import { appendEditFailureContext, type EditFailureContextPatch } from "./model-recovery/edit-failure-context.ts";
 import {
@@ -32,6 +32,10 @@ interface ToolInputRepair {
   validation?: RepairValidation;
 }
 
+export function welderStatusText(runtime: WelderRuntime): string {
+  return runtime.enabled ? "🔧 welder: on" : "🔧 welder: on (repairs off)";
+}
+
 export async function handleSessionStart(
   runtime: WelderRuntime,
   ctx: WelderContext,
@@ -39,9 +43,8 @@ export async function handleSessionStart(
 ): Promise<void> {
   resetSessionState(runtime);
   runtime.stats.sessionId = sessionId(ctx);
-  runtime.enabled = true;
   await pruneOldSessions(logDir(ctx), retention).catch(() => {});
-  if (ctx.hasUI) ctx.ui.setStatus("welder", "🔧 welder: on");
+  if (ctx.hasUI) ctx.ui.setStatus("welder", welderStatusText(runtime));
 }
 
 export async function handleSessionShutdown(ctx: WelderContext): Promise<void> {
@@ -65,7 +68,7 @@ export async function handleToolCall(
 
   await recordRepairEvent(ctx, event.toolName, repair);
 
-  if (runtime.enabled && event.toolName === "edit") {
+  if (runtime.enabled && event.toolName === "edit" && !runtime.disabledRepairs.has("resolve-ambiguous-edit")) {
     const preflight = await preflightEditMismatch({
       toolInput: input as Record<string, unknown>,
       cwd: ctx.cwd,
@@ -86,7 +89,7 @@ export function repairToolInput(
   input: Record<string, unknown>,
 ): ToolInputRepair {
   runtime.stats.totalToolCalls++;
-  const repair = repairArgs(input, { toolName });
+  const repair = repairArgs(input, { toolName, disabledActions: runtime.disabledRepairs });
 
   // In-memory stats always track the signal, even when repairs are off.
   recordValidation(runtime.stats, repair.validation);
@@ -129,7 +132,9 @@ export async function handleToolResult(
   event: ToolResultEvent,
   ctx: WelderContext,
 ): Promise<ResultRepairPatch | EditFailureContextPatch | undefined> {
-  const deterministicRepair = runtime.enabled ? await repairResult(event, ctx.cwd) : undefined;
+  const deterministicRepair = runtime.enabled
+    ? await repairResult(event, ctx.cwd, resultRepairRules.filter((rule) => !runtime.disabledRepairs.has(rule.name)))
+    : undefined;
   if (deterministicRepair) {
     recordRepairs(runtime.stats, deterministicRepair.repairs);
     await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, deterministicRepair.repairs);

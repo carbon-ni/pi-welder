@@ -23,6 +23,7 @@ import {
   type FailureEvent,
 } from "./recorder/index.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
+import { welderStatusText } from "./handlers.ts";
 
 export interface WelderCommandSpec {
   name: string;
@@ -166,6 +167,9 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
         await openWelderSettings(ctx, items, (id, value) => {
           current = applyWelderSetting(current, id, value);
           runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
+          runtime.enabled = current.repairsEnabled;
+          runtime.disabledRepairs = new Set(current.disabledRepairs);
+          ctx.ui.setStatus("welder", welderStatusText(runtime));
           try {
             setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);
           } catch {
