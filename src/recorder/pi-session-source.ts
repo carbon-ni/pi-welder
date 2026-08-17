@@ -26,6 +26,11 @@ interface PiMessage {
   toolName?: string;
   isError?: boolean;
   content?: unknown;
+  details?: {
+    failureContext?: {
+      errorKind?: string;
+    };
+  };
   timestamp?: number;
 }
 
@@ -86,6 +91,7 @@ export function extractPiFailures(records: readonly PiRecord[]): FailureEvent[] 
       ? Object.keys(call.arguments)
       : [];
     const errorText = extractContentText(msg.content);
+    const structuredErrorKind = msg.details?.failureContext?.errorKind;
     const ts = typeof msg.timestamp === "number"
       ? new Date(msg.timestamp).toISOString()
       : new Date().toISOString();
@@ -93,7 +99,7 @@ export function extractPiFailures(records: readonly PiRecord[]): FailureEvent[] 
     failures.push({
       toolName,
       wasError: true,
-      errorKind: classifyErrorKind(errorText),
+      errorKind: structuredErrorKind ?? classifyErrorKind(errorText),
       errorText,
       inputKeys,
       ts,

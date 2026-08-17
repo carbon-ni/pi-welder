@@ -64,7 +64,18 @@ export function buildToolResultEvent(input: BuildToolResultEventInput): WelderEv
 export function classifyErrorKind(errorText: string): string {
   const first = errorText.split(/\s|:/)[0]?.trim();
   if (first && /^[A-Z][A-Z0-9_]+$/.test(first)) return first;
+
   const lower = errorText.toLowerCase();
+  if (lower.includes("oldtext must not be empty")) return "EDIT_EMPTY_ANCHOR";
+  if (lower.includes("validation failed for tool \"edit\"")) return "EDIT_INVALID_SHAPE";
+  if (lower.includes("replacement produced identical content")) return "EDIT_NOOP";
+  if (lower.includes("edits[") && lower.includes("overlap")) return "EDIT_OVERLAP";
+  if (lower.includes("oldtext") && (lower.includes("must be unique") || lower.includes("occurrences"))) {
+    return "EDIT_NOT_UNIQUE";
+  }
+  if (lower.includes("oldtext") && (lower.includes("could not find") || lower.includes("not found") || lower.includes("must match"))) {
+    return "EDIT_NOT_FOUND";
+  }
   if (lower.includes("enoent") || lower.includes("no such file")) return "ENOENT";
   if (lower.includes("edit_mismatch") || lower.includes("oldtext")) return "EDIT_MISMATCH";
   if (lower.includes("schema") || lower.includes("invalid") || lower.includes("expected")) return "SCHEMA";

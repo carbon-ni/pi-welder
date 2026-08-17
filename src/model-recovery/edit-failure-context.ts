@@ -17,6 +17,7 @@ export interface EditFailureContextPatch {
   details: {
     failureContext: {
       path: string;
+      errorKind: "EDIT_NOT_FOUND" | "EDIT_NOT_UNIQUE";
       editIndexes: number[];
       candidateSections: number;
       truncated: boolean;
@@ -98,6 +99,7 @@ export async function appendEditFailureContext(
     details: {
       failureContext: {
         path: target,
+        errorKind: classifyEditMismatchKind(errorText),
         editIndexes,
         candidateSections: sections.length,
         truncated: omitted > 0 || excerptWasTruncated || Buffer.byteLength(blocks.join("\n"), "utf8") > MAX_CONTEXT_BYTES,
@@ -111,6 +113,12 @@ function isEditMismatch(errorText: string): boolean {
   const lower = errorText.toLowerCase();
   const mentionsTarget = lower.includes("oldtext") || lower.includes("old text") || lower.includes("exact text") || lower.includes("occurrences of the text");
   return mentionsTarget && (lower.includes("could not find") || lower.includes("not found") || lower.includes("must match") || lower.includes("must be unique") || lower.includes("occurrences"));
+}
+
+function classifyEditMismatchKind(errorText: string): "EDIT_NOT_FOUND" | "EDIT_NOT_UNIQUE" {
+  const lower = errorText.toLowerCase();
+  if (lower.includes("must be unique") || lower.includes("occurrences")) return "EDIT_NOT_UNIQUE";
+  return "EDIT_NOT_FOUND";
 }
 
 function parseEdits(value: unknown): EditInput[] {

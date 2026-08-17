@@ -21,7 +21,13 @@ function call(id: string, name: string, args: Record<string, unknown> = {}) {
   };
 }
 
-function result(id: string, toolName: string, text: string, isError: boolean) {
+function result(
+  id: string,
+  toolName: string,
+  text: string,
+  isError: boolean,
+  details?: Record<string, unknown>,
+) {
   return {
     type: "message",
     message: {
@@ -30,6 +36,7 @@ function result(id: string, toolName: string, text: string, isError: boolean) {
       toolName,
       isError,
       content: [{ type: "text", text }],
+      details,
       timestamp: Date.now(),
     },
   };
@@ -97,6 +104,20 @@ test("extractPiFailures classifies error kind from raw text", () => {
   const records = [result("c1", "edit", "EDIT_MISMATCH: oldText not found", true)];
   const failures = extractPiFailures(records);
   assert.equal(failures[0]!.errorKind, "EDIT_MISMATCH");
+});
+
+test("extractPiFailures preserves structured edit kind after fresh context replaces error text", () => {
+  const records = [result(
+    "c1",
+    "edit",
+    "Fresh context read from file.ts: expectedValue",
+    true,
+    { failureContext: { errorKind: "EDIT_NOT_UNIQUE" } },
+  )];
+
+  const failures = extractPiFailures(records);
+
+  assert.equal(failures[0]!.errorKind, "EDIT_NOT_UNIQUE");
 });
 
 // ─── readPiSessionFile (I/O) ────────────────────────────────────────────

@@ -52,6 +52,7 @@ test("appends every exact candidate section for an ambiguous failed edit", async
   const text = patch?.content[0]?.text ?? "";
 
   assert.equal(patch?.isError, true);
+  assert.equal(patch?.details.failureContext.errorKind, "EDIT_NOT_UNIQUE");
   assert.match(text, /Fresh context read from file\.ts for edits\[0\], lines \d+-\d+:/);
   assert.equal(text.match(/Fresh context read from file\.ts for edits\[0\]/g)?.length, 1);
   assert.doesNotMatch(text, /Found 2 occurrences|call read|read only|current_file_context|candidate|match:/i);
@@ -81,6 +82,7 @@ test("locates a likely current section when oldText no longer matches exactly", 
   ), root);
   const text = patch?.content[0]?.text ?? "";
 
+  assert.equal(patch?.details.failureContext.errorKind, "EDIT_NOT_FOUND");
   assert.match(text, /Fresh context read from file\.ts for edits\[0\], lines \d+-\d+:/);
   assert.match(text, /export function calculateTotal\(value: number\)/);
   assert.doesNotMatch(text, /No fresh context found/);
