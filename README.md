@@ -46,8 +46,10 @@ Repairs live in `src/repairs/` and are pure (no Pi APIs, no I/O, no clocks). The
 | `strip-extra-props` | Items duplicate parent-level props the schema doesn't allow |
 | `relational-default` | `limit` without `offset` (or vice versa) |
 | `nest-edit-fields` | Flat `oldText`/`newText` on the `edit` tool → `edits: [{...}]` |
+| `resolve-ambiguous-edit` | Preflight makes a locator unique, normalizes whitespace, or narrows stale outer context to an exact change hunk |
+| `edit-noop` | A failed single no-op edit is verified against current file and returned as successful desired state |
 
-Valid input passes through unchanged. Field classification is centralized in [`src/fields.ts`](src/fields.ts) — that's the only file that needs to change to grow coverage.
+Valid input passes through unchanged. Input field classification is centralized in [`src/fields.ts`](src/fields.ts). Filesystem-backed preflight and result repairs live outside the pure input engine and abstain when current state cannot prove a safe repair.
 
 ## Commands
 

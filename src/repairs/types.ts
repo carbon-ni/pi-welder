@@ -18,6 +18,7 @@ export type RepairAction =
   | "directory-read"
   | "missing-read-context"
   | "read-offset-context"
+  | "edit-noop"
   | "resolve-ambiguous-edit";
 
 export interface Repair {

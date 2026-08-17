@@ -56,6 +56,44 @@ test("handleToolResult recovers a read offset past EOF", async () => {
   assert.equal(runtime.stats.repairsByAction.get("read-offset-context"), 1);
 });
 
+test("handleToolResult converts a verified no-op edit into success", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-noop-"));
+  await writeFile(path.join(root, "notes.txt"), "one\ntwo\nthree");
+  const runtime = createRuntime();
+  const event = {
+    toolName: "edit",
+    input: { path: "notes.txt", edits: [{ oldText: "two", newText: "two" }] },
+    isError: true,
+    content: [{ type: "text", text: "No changes made. The replacement produced identical content." }],
+    details: {},
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result?.isError, false);
+  assert.equal(runtime.recovery.failures.length, 0);
+  assert.equal(runtime.stats.repairsByAction.get("edit-noop"), 1);
+});
+
+test("handleToolResult keeps no-op edit failure when its repair is disabled", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-handler-noop-"));
+  await writeFile(path.join(root, "notes.txt"), "one\ntwo\nthree");
+  const runtime = createRuntime();
+  runtime.disabledRepairs = new Set(["edit-noop"]);
+  const event = {
+    toolName: "edit",
+    input: { path: "notes.txt", edits: [{ oldText: "two", newText: "two" }] },
+    isError: true,
+    content: [{ type: "text", text: "No changes made. The replacement produced identical content." }],
+    details: {},
+  } as any;
+
+  const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
+
+  assert.equal(result, undefined);
+  assert.equal(runtime.recovery.failures.length, 1);
+});
+
 test("handleToolResult enriches ENOENT with folder tree and keeps failure signal", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-handler-missing-"));
   await mkdir(path.join(root, "src"));

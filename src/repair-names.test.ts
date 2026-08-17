@@ -20,6 +20,7 @@ test("REPAIR_NAMES covers input rules, object rules, result rules, and edit pref
   assert.ok(names.has("directory-read"));
   assert.ok(names.has("missing-read-context"));
   assert.ok(names.has("read-offset-context"));
+  assert.ok(names.has("edit-noop"));
   // edit preflight
   assert.ok(names.has("resolve-ambiguous-edit"));
 });

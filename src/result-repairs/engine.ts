@@ -1,4 +1,5 @@
 import { listDirectoryForRead } from "./directory-read.ts";
+import { recoverEditNoop } from "./edit-noop.ts";
 import { appendMissingReadContext } from "./missing-read-context.ts";
 import { recoverReadOffsetContext } from "./read-offset-context.ts";
 import type { ResultRepair, ResultRepairRule, ToolResultShape } from "./types.ts";
@@ -24,6 +25,15 @@ const readOffsetContextRule: ResultRepairRule = {
   },
 };
 
+const editNoopRule: ResultRepairRule = {
+  name: "edit-noop",
+  async repair(event, cwd) {
+    const patch = await recoverEditNoop(event, cwd);
+    if (!patch) return undefined;
+    return { patch, repairs: [{ field: "edits[0]", action: "edit-noop" }] };
+  },
+};
+
 const missingReadContextRule: ResultRepairRule = {
   name: "missing-read-context",
   async repair(event, cwd) {
@@ -36,6 +46,7 @@ const missingReadContextRule: ResultRepairRule = {
 export const resultRepairRules: readonly ResultRepairRule[] = Object.freeze([
   directoryReadRule,
   readOffsetContextRule,
+  editNoopRule,
   missingReadContextRule,
 ]);
 

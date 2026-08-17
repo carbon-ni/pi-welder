@@ -51,6 +51,59 @@ test("repairToolResult adds nearest-folder context to missing reads", async () =
   assert.deepEqual(repair?.repairs, [{ field: "path", action: "missing-read-context" }]);
 });
 
+test("repairToolResult treats a verified single no-op edit as success", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-result-"));
+  await writeFile(path.join(root, "notes.txt"), "one\ntwo\nthree");
+
+  const repair = await repairToolResult({
+    toolName: "edit",
+    input: {
+      path: "notes.txt",
+      edits: [{ oldText: "two", newText: "two" }],
+    },
+    isError: true,
+    content: "No changes made to notes.txt. The replacement produced identical content.",
+  }, root);
+
+  assert.equal(repair?.patch.isError, false);
+  assert.deepEqual(repair?.repairs, [{ field: "edits[0]", action: "edit-noop" }]);
+  assert.match(repair?.patch.content[0]?.text ?? "", /already matches current content/);
+});
+
+test("repairToolResult does not hide a no-op error when current text is absent", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-result-"));
+  await writeFile(path.join(root, "notes.txt"), "one\nthree");
+
+  const repair = await repairToolResult({
+    toolName: "edit",
+    input: {
+      path: "notes.txt",
+      edits: [{ oldText: "two", newText: "two" }],
+    },
+    isError: true,
+    content: "No changes made to notes.txt. The replacement produced identical content.",
+  }, root);
+
+  assert.equal(repair, undefined);
+});
+
+test("repairToolResult does not treat a real replacement as a no-op", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-result-"));
+  await writeFile(path.join(root, "notes.txt"), "one\ntwo\nthree");
+
+  const repair = await repairToolResult({
+    toolName: "edit",
+    input: {
+      path: "notes.txt",
+      edits: [{ oldText: "two", newText: "changed" }],
+    },
+    isError: true,
+    content: "No changes made to notes.txt. The replacement produced identical content.",
+  }, root);
+
+  assert.equal(repair, undefined);
+});
+
 test("repairToolResult leaves unrelated failures unchanged", async () => {
   assert.equal(await repairToolResult({
     toolName: "bash", input: {}, isError: true,
