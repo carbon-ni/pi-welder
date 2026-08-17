@@ -4,6 +4,8 @@ import { whitespaceNormalizedOffsets } from "./whitespace-normalized.ts";
 
 interface EditInput { oldText: string; newText: string }
 
+const MINIMAL_HUNK_CONTEXT_CHARS = 64;
+
 /**
  * Deterministic preflight: before the built-in `edit` tool runs, expand
  * ambiguous `oldText` values (multiple occurrences) to unique surrounding
@@ -130,14 +132,67 @@ function resolveMissingEdits(
 
   const repairs: LocalRepair[] = [];
   for (const edit of missing) {
+    const occupied = [...protectedRanges, ...repairs.map(({ range }) => range)];
     const matches = whitespaceNormalizedOffsets(current, edit.oldText)
-      .filter((range) => !protectedRanges.some((range2) => rangesOverlap(range, range2))
-        && !repairs.some(({ range: range2 }) => rangesOverlap(range, range2)));
-    if (matches.length !== 1) return undefined;
-    const range = matches[0]!;
-    repairs.push({ index: edit.index, oldText: current.slice(range.start, range.end), newText: edit.newText, range });
+      .filter((range) => !occupied.some((occupiedRange) => rangesOverlap(range, occupiedRange)));
+    if (matches.length > 1) return undefined;
+    if (matches.length === 1) {
+      const range = matches[0]!;
+      repairs.push({ index: edit.index, oldText: current.slice(range.start, range.end), newText: edit.newText, range });
+      continue;
+    }
+
+    const narrowed = narrowToUniqueChangeHunk(current, edit, occupied);
+    if (!narrowed) return undefined;
+    repairs.push({ index: edit.index, ...narrowed });
   }
   return repairs;
+}
+
+/**
+ * Remove stale unchanged outer context while preserving the exact intended
+ * old -> new change. The narrowed locator must still match one current slice
+ * exactly, so concurrent content inside the intended hunk is never replaced.
+ */
+function narrowToUniqueChangeHunk(
+  current: string,
+  edit: EditInput,
+  occupied: TextRange[],
+): Omit<LocalRepair, "index"> | undefined {
+  if (edit.oldText === edit.newText) return undefined;
+
+  const prefixLength = commonPrefixLength(edit.oldText, edit.newText);
+  const suffixLength = commonSuffixLength(edit.oldText, edit.newText, prefixLength);
+  const oldChangeEnd = edit.oldText.length - suffixLength;
+  const newChangeEnd = edit.newText.length - suffixLength;
+  const contextStart = Math.max(0, prefixLength - MINIMAL_HUNK_CONTEXT_CHARS);
+  const contextEnd = Math.min(edit.oldText.length, oldChangeEnd + MINIMAL_HUNK_CONTEXT_CHARS);
+  const oldText = edit.oldText.slice(contextStart, contextEnd);
+  if (oldText.length === 0 || oldText === edit.oldText) return undefined;
+
+  const offsets = occurrenceOffsets(current, oldText);
+  if (offsets.length !== 1) return undefined;
+  const range = { start: offsets[0]!, end: offsets[0]! + oldText.length };
+  if (occupied.some((occupiedRange) => rangesOverlap(range, occupiedRange))) return undefined;
+
+  const leftContext = edit.oldText.slice(contextStart, prefixLength);
+  const newChange = edit.newText.slice(prefixLength, newChangeEnd);
+  const rightContext = edit.oldText.slice(oldChangeEnd, contextEnd);
+  return { oldText, newText: leftContext + newChange + rightContext, range };
+}
+
+function commonPrefixLength(left: string, right: string): number {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < limit && left[index] === right[index]) index++;
+  return index;
+}
+
+function commonSuffixLength(left: string, right: string, prefixLength: number): number {
+  const limit = Math.min(left.length - prefixLength, right.length - prefixLength);
+  let length = 0;
+  while (length < limit && left[left.length - 1 - length] === right[right.length - 1 - length]) length++;
+  return length;
 }
 
 function findUniqueExpansion(current: string, oldText: string, start: number): TextRange | undefined {

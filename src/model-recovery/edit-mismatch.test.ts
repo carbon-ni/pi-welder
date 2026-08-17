@@ -109,6 +109,52 @@ test("abstains when the whitespace-normalized match is not unique", async () => 
   assert.equal(toolInput.edits[0]?.oldText, "return  1;");
 });
 
+test("narrows stale outer context to a unique intended change hunk", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
+  const stableContext = `  // ${"stable context ".repeat(8)}\n`;
+  const current = [
+    "function calculate() {",
+    "  const concurrentValue = true;",
+    stableContext.trimEnd(),
+    "  return oldValue;",
+    "}",
+  ].join("\n");
+  await writeFile(path.join(root, "file.ts"), current);
+  const oldText = [
+    "function calculate() {",
+    "  const staleValue = true;",
+    stableContext.trimEnd(),
+    "  return oldValue;",
+    "}",
+  ].join("\n");
+  const newText = oldText.replace("return oldValue", "return newValue");
+  const toolInput = { path: "file.ts", edits: [{ oldText, newText }] };
+
+  const result = await preflightEditMismatch({ toolInput, cwd: root });
+
+  assert.equal(result?.repairedEdits, 1);
+  assert.notEqual(toolInput.edits[0]?.oldText, oldText);
+  assert.equal(current.split(toolInput.edits[0]!.oldText).length - 1, 1);
+  assert.equal(toolInput.edits[0]?.newText.includes("return newValue"), true);
+  assert.equal(toolInput.edits[0]?.newText.includes("staleValue"), false);
+  assert.equal(await readFile(path.join(root, "file.ts"), "utf8"), current);
+});
+
+test("abstains from hunk narrowing when intended old content is absent", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
+  const stableContext = `  // ${"stable context ".repeat(8)}\n`;
+  const current = `function calculate() {\n${stableContext}  return currentValue;\n}\n`;
+  await writeFile(path.join(root, "file.ts"), current);
+  const oldText = `function calculate() {\n  const staleValue = true;\n${stableContext}  return oldValue;\n}`;
+  const newText = oldText.replace("return oldValue", "return newValue");
+  const toolInput = { path: "file.ts", edits: [{ oldText, newText }] };
+
+  const result = await preflightEditMismatch({ toolInput, cwd: root });
+
+  assert.equal(result, undefined);
+  assert.equal(toolInput.edits[0]?.oldText, oldText);
+});
+
 test("abstains when oldText is truly absent (no normalized match)", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-local-missing-"));
   const current = "const value = 1; // current\n";
