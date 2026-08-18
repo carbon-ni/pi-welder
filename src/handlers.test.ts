@@ -235,23 +235,21 @@ test("handleContext injects recovery guidance through explicit runtime", async (
   assert.match(String(guidance?.content), /read a fresh snippet/);
 });
 
-test("handleToolResult returns fresh file context when agent-mode edit recovery is rejected", async () => {
+test("handleToolResult passes edit mismatch failures through unchanged", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-handler-edit-context-"));
   await writeFile(path.join(root, "file.ts"), "function first() {\n  return 1;\n}\nfunction second() {\n  return 1;\n}\n");
   const runtime = createRuntime();
   const event = {
     toolName: "edit", isError: true,
     input: { path: "file.ts", edits: [{ oldText: "  return 1;", newText: "  return 2;" }] },
-    content: "Found 2 occurrences of edits[0] in file.ts. Each oldText must be unique.",
+    content: [{ type: "text", text: "Found 2 occurrences of edits[0] in file.ts. Each oldText must be unique." }],
+    details: {},
   } as any;
 
   const result = await handleToolResult(runtime, event, ctx({ cwd: root }));
 
-  assert.equal(result?.isError, true);
-  assert.match(String(result?.content[0]?.text), /Fresh context read from file\.ts for edits\[0\]/);
-  assert.match(String(result?.content[0]?.text), /function first/);
-  assert.doesNotMatch(String(result?.content[0]?.text), /call read|read only/i);
-  assert.match(runtime.recovery.failures[0]?.errorText ?? "", /Fresh context read from file\.ts for edits\[0\]/);
+  assert.equal(result, undefined);
+  assert.match(runtime.recovery.failures[0]?.errorText ?? "", /Found 2 occurrences/);
 });
 
 test("handleToolCall records repair warnings in runtime", async () => {

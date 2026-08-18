@@ -12,9 +12,9 @@ const MINIMAL_HUNK_CONTEXT_CHARS = 64;
  * context so the edit lands in exactly one place.
  *
  * Edits whose `oldText` has zero occurrences cannot be located without an
- * external reasoner; this preflight abstains on those and leaves them for the
- * deterministic edit-failure-context path. The repair is all-or-nothing: if any
- * pending edit cannot be resolved locally, nothing is mutated.
+ * external reasoner; this preflight abstains on those so the tool fails
+ * cleanly with its own error. The repair is all-or-nothing: if any pending
+ * edit cannot be resolved locally, nothing is mutated.
  */
 export async function preflightEditMismatch(input: {
   toolInput: Record<string, unknown>;
@@ -38,9 +38,9 @@ export async function preflightEditMismatch(input: {
   if (!local) return undefined;
 
   // Missing edits (zero exact occurrences) get one deterministic retry:
-  // a unique whitespace-normalized match. Edits that stay missing abort the
-  // whole repair, so the edit fails cleanly and the deterministic
-  // failure-context path can attach fresh file context.
+  // a unique whitespace-normalized match, then a unique narrowed change
+  // hunk. Edits that stay missing abort the whole repair, so the edit fails
+  // cleanly with its own error.
   const missing = resolveMissingEdits(current, edits, pending, local);
   if (!missing) return undefined;
 

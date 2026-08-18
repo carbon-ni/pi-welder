@@ -2,7 +2,6 @@ import type { ContextEvent, ToolCallEvent, ToolResultEvent, WelderContext } from
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import { repairToolResult as repairResult, resultRepairRules, type ResultRepairPatch } from "./result-repairs/index.ts";
 import { preflightEditMismatch } from "./model-recovery/edit-mismatch.ts";
-import { appendEditFailureContext, type EditFailureContextPatch } from "./model-recovery/edit-failure-context.ts";
 import {
   consumeRecoveryGuidance,
   extractToolErrorText,
@@ -131,7 +130,7 @@ export async function handleToolResult(
   runtime: WelderRuntime,
   event: ToolResultEvent,
   ctx: WelderContext,
-): Promise<ResultRepairPatch | EditFailureContextPatch | undefined> {
+): Promise<ResultRepairPatch | undefined> {
   const deterministicRepair = runtime.enabled
     ? await repairResult(event, ctx.cwd, resultRepairRules.filter((rule) => !runtime.disabledRepairs.has(rule.name)))
     : undefined;
@@ -145,15 +144,10 @@ export async function handleToolResult(
     return deterministicRepair.patch;
   }
 
-  const failureContext = runtime.enabled
-    ? await appendEditFailureContext(event, ctx.cwd).catch(() => undefined)
-    : undefined;
-  recordToolResult(runtime.recovery, failureContext ? { ...event, ...failureContext } : event);
+  recordToolResult(runtime.recovery, event);
   const errorText = extractToolErrorText(event);
-  if (!errorText) return failureContext;
-
-  await recordFailedToolResult(runtime, event, errorText, ctx);
-  return failureContext;
+  if (errorText) await recordFailedToolResult(runtime, event, errorText, ctx);
+  return undefined;
 }
 
 async function recordFailedToolResult(
