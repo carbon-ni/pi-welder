@@ -1,3 +1,12 @@
+---
+id: TASK-0005
+title: Add schema poisoning defense for provider requests
+status: todo
+depends_on: []
+priority: normal
+tags: [schema, providers]
+---
+
 # Add schema poisoning defense for provider requests
 
 ## Problem

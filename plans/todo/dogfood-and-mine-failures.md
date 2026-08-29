@@ -1,3 +1,12 @@
+---
+id: TASK-0002
+title: Dogfood and mine remaining tool failures
+status: todo
+depends_on: []
+priority: high
+tags: [observability, evidence]
+---
+
 # Dogfood and mine remaining tool failures
 
 ## Problem

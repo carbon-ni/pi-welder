@@ -1,3 +1,12 @@
+---
+id: TASK-0001
+title: Make lint work from fresh checkout
+status: todo
+depends_on: []
+priority: normal
+tags: [tooling]
+---
+
 # Make lint work from fresh checkout
 
 ## Problem

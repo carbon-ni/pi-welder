@@ -1,3 +1,12 @@
+---
+id: TASK-0004
+title: Clean leaked grammar tokens from parsed tool-call args
+status: todo
+depends_on: []
+priority: normal
+tags: [repairs, safety]
+---
+
 # Clean leaked grammar tokens from parsed tool-call args
 
 ## Problem
