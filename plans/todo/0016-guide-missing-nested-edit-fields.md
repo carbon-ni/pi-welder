@@ -1,7 +1,7 @@
 ---
 id: TASK-0016
 title: Guide missing nested edit fields
-status: todo
+status: doing
 depends_on: []
 priority: high
 tags: [edit, schema, recovery]
