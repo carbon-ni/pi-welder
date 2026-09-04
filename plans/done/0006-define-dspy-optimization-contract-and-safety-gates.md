@@ -1,7 +1,7 @@
 ---
 id: TASK-0006
 title: Define DSPy optimization contract and safety gates
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [dspy, experiment, safety]
@@ -28,4 +28,6 @@ Candidate score should cover unrepaired validity, successful execution, recurren
 
 ## Notes
 DSPy availability is capability, not justification. This task can conclude that data or metrics are insufficient.
+
+Completed contract: `plans/contracts/dspy-optimization-contract.md` version 2. Candidate messages are structurally limited to actual repair transparency or factual result enrichment; generic failure guidance is ineligible. Evidence: `.tmp/reports/04-09-26/task-0006-dspy-contract.md`.
 
