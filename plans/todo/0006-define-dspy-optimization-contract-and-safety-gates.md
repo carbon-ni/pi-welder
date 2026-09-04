@@ -1,7 +1,7 @@
 ---
 id: TASK-0006
 title: Define DSPy optimization contract and safety gates
-status: todo
+status: doing
 depends_on: []
 priority: high
 tags: [dspy, experiment, safety]
@@ -15,13 +15,13 @@ DSPy can search many prompt and demonstration variants, but pi-welder has no agr
 ## Context
 Define experiment before implementation. Treat semantic mutation as hard failure, not weighted tradeoff. Prefer time-ordered session splits so similar calls from one session cannot leak across train and holdout sets.
 
-Candidate score should cover unrepaired validity, successful execution, recurrence, tool-call count, latency, and token cost. Compare every optimizer against current static guidance and no-guidance baselines.
+Candidate score should cover unrepaired validity, successful execution, recurrence, tool-call count, latency, and token cost. Generic recovery guidance has been removed. Compare any optimizer only on messages that transparently describe an actual deterministic repair or add factual action-specific context, using current repair warnings and no-message behavior as baselines.
 
 ## Acceptance criteria
 - [ ] Primary outcome and secondary cost metrics are explicit and computable.
 - [ ] Content fields, paths, and intended replacements have hard safety invariants.
 - [ ] Train, development, and untouched holdout split rules prevent session leakage.
-- [ ] Baselines include current guidance and no guidance.
+- [ ] Baselines include current repair warnings and no-message behavior; generic recovery guidance is excluded.
 - [ ] Fixed seeds, model versions, call budget, timeout, and retry policy are recorded.
 - [ ] Go/no-go thresholds define minimum gain and zero tolerated safety regressions.
 - [ ] Runtime and offline responsibilities are explicit.
