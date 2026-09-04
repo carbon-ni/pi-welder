@@ -1,7 +1,7 @@
 ---
 id: TASK-0003
 title: Expand schema registry and aliases from evidence
-status: todo
+status: doing
 depends_on: [TASK-0002]
 priority: normal
 tags: [schema, repairs]
