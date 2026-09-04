@@ -1,3 +1,5 @@
+import { ARRAY_ITEM_SCHEMAS, EDIT_ITEM_ALIASES } from "./fields.ts";
+
 export interface SchemaField {
   type: "string" | "number" | "boolean" | "array" | "object";
   required?: boolean;
@@ -61,7 +63,10 @@ export function hasUnknownSchemaField(input: Record<string, unknown>, schema: To
 
 export function hasSchemaRepairSignal(toolName: string | undefined, input: Record<string, unknown>): boolean {
   if (!toolName) return false;
-  if (toolName === "edit" && !("edits" in input) && ("oldText" in input || "old_text" in input)) return true;
+  if (toolName === "edit") {
+    if (!("edits" in input) && ("oldText" in input || "old_text" in input)) return true;
+    if (hasEditItemRepairSignal(input.edits)) return true;
+  }
 
   const aliases = FIELD_ALIASES.get(toolName);
   if (!aliases) return false;
@@ -71,6 +76,19 @@ export function hasSchemaRepairSignal(toolName: string | undefined, input: Recor
     if (aliasList.some((alias) => alias in input && input[alias] != null)) return true;
   }
   return false;
+}
+
+function hasEditItemRepairSignal(edits: unknown): boolean {
+  if (!Array.isArray(edits)) return false;
+  const allowed = ARRAY_ITEM_SCHEMAS.get("edits");
+  if (!allowed) return false;
+
+  return edits.some((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+    return Object.keys(item).some((key) =>
+      !allowed.has(key) || Array.from(EDIT_ITEM_ALIASES.values()).some((aliases) => aliases.includes(key))
+    );
+  });
 }
 
 export function validateAgainstSchema(input: Record<string, unknown>, schema: ToolSchema): ValidationIssue[] {

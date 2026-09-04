@@ -415,6 +415,24 @@ test("renames old_string/new_string and old_text/new_text item aliases", () => {
   ]);
 });
 
+test("repairs edit item aliases when the edit tool name is supplied", () => {
+  const { result, repairs } = repairArgs(
+    { edits: [{ old_str: "a", new_str: "b" }] },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { edits: [{ oldText: "a", newText: "b" }] });
+  assert.deepEqual(repairs.map((repair) => repair.action), ["rename-edit-item-alias"]);
+});
+
+test("strips extra edit item fields when the edit tool name is supplied", () => {
+  const { result, repairs } = repairArgs(
+    { edits: [{ oldText: "a", newText: "b", occurrences: 2 }] },
+    { toolName: "edit" },
+  );
+  assert.deepEqual(result, { edits: [{ oldText: "a", newText: "b" }] });
+  assert.deepEqual(repairs.map((repair) => repair.action), ["strip-extra-props"]);
+});
+
 test("canonical key wins when both alias and canonical are present", () => {
   const { result, repairs } = repairArgs({
     edits: [{ oldText: "keep", newText: "b", old_str: "drop" }],
@@ -441,7 +459,10 @@ test("does not rename alias keys outside edits items", () => {
 });
 
 test("leaves alias-free edits items untouched", () => {
-  const { result, repairs } = repairArgs({ edits: [{ oldText: "a", newText: "b" }] });
+  const { result, repairs } = repairArgs(
+    { edits: [{ oldText: "a", newText: "b" }] },
+    { toolName: "edit" },
+  );
   assert.deepEqual(result.edits, [{ oldText: "a", newText: "b" }]);
   assert.equal(repairs.length, 0);
 });
