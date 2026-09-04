@@ -1,7 +1,7 @@
 ---
 id: TASK-0002
 title: Dogfood and mine remaining tool failures
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [observability, evidence]
@@ -28,3 +28,5 @@ Use pi-welder in normal Pi sessions, then mine logs to rank the next repair oppo
 
 ## Notes
 Prefer data-driven rules. Do not add speculative model-specific fixes without mined evidence.
+
+Completed evidence: `.pi/welder-log/failures-report.md` and `.tmp/reports/04-09-26/task-0002-acceptance-evidence.md`. Ambiguous content/path repairs and generic-message-only behavior were rejected. Duplicate-edit classification normalization landed separately.
