@@ -1,7 +1,7 @@
 ---
 id: TASK-0013
 title: Evaluate bounded ambiguous-edit candidate selection
-status: doing
+status: done
 depends_on: [TASK-0008, TASK-0009]
 priority: low
 tags: [edit, classifier, safety, experiment]
@@ -28,4 +28,6 @@ Compare DSPy-optimized classifier with deterministic similarity ranking and alwa
 
 ## Notes
 Past exact-byte generation accepted only 1 of 9 current positional requests. Do not repeat that responsibility boundary.
+
+Completed as advisory only. No real exact candidate/retry evidence exists yet; production remains always-abstain. Offline evaluation predeclares ≥0.99 precision and ≥30 held-out samples before auto-application can be considered. Evidence: `.tmp/reports/04-09-26/task-0013-ambiguous-edit-selection.md`.
 
