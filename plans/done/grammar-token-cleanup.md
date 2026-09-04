@@ -1,7 +1,7 @@
 ---
 id: TASK-0004
 title: Clean leaked grammar tokens from parsed tool-call args
-status: todo
+status: done
 depends_on: []
 priority: normal
 tags: [repairs, safety]
@@ -31,3 +31,6 @@ Safely strip known grammar marker prefixes/suffixes from tool-call argument stru
 - Full grammar recovery.
 - Converting assistant text into `toolCall` blocks.
 - Model/vendor parser matrix.
+
+## Decision
+Rejected from current evidence. A scan of 3,924 Pi sessions, 329,829 parsed argument payloads, and local Welder logs found zero structural grammar-token leaks. The only two matches were intentional prose in content fields. Revisit only with a raw malformed call and paired retry evidence. See `.tmp/reports/04-09-26/task-0004-grammar-token-evidence.md`.
