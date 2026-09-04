@@ -1,7 +1,7 @@
 ---
 id: TASK-0007
 title: Capture guidance delivery and retry outcomes
-status: doing
+status: done
 depends_on: [TASK-0006]
 priority: high
 tags: [observability, dataset, privacy]
@@ -28,4 +28,6 @@ Define deterministic correlation semantics: originating event, guidance snapshot
 
 ## Notes
 Do not infer success only from absence of an error. Require an observed relevant call/result pair.
+
+Completed with deterministic, privacy-preserving episode correlation for delivered repair warnings and factual result-repair patches only. Generic recovery is excluded. Evidence: `.tmp/reports/04-09-26/task-0007-episode-capture.md`.
 
