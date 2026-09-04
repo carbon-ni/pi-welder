@@ -1,7 +1,7 @@
 ---
 id: TASK-0009
 title: Spike DSPy.ts in an offline Welder Lab
-status: doing
+status: done
 depends_on: [TASK-0006]
 priority: high
 tags: [dspy, spike, offline]
@@ -29,4 +29,6 @@ Investigate gap between DSPy.ts text generation and Pi/OpenRouter native tool-ca
 
 ## Notes
 Stop if library integration costs more than implementing bounded prompt search directly.
+
+Completed with a no-DSPy-dependency decision: its text-only driver and missing runtime caps would duplicate the existing benchmark adapter at high dependency cost. Added a bounded seeded offline search and opt-in real-model smoke; `.tmp/lab-smoke-report.md` records the ignored run. Evidence: `.tmp/reports/04-09-26/task-0009-lab-spike.md`.
 
