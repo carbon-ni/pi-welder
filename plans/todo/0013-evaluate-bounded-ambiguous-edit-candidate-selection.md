@@ -1,7 +1,7 @@
 ---
 id: TASK-0013
 title: Evaluate bounded ambiguous-edit candidate selection
-status: todo
+status: doing
 depends_on: [TASK-0008, TASK-0009]
 priority: low
 tags: [edit, classifier, safety, experiment]
