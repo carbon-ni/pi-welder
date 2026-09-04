@@ -4,7 +4,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { createOpenRouterClient, runSmoke } from "./smoke.ts";
+import { createOpenRouterClient, FALLBACK_EPISODES, runSmoke } from "./smoke.ts";
 import type { ModelClient } from "./runner.ts";
 
 test("smoke without credentials does not run", async () => {
@@ -49,4 +49,30 @@ test("smoke with injected fake client writes a bounded ignored report", async ()
 
 test("openrouter client requires an api key", () => {
   assert.throws(() => createOpenRouterClient(""), /api key/);
+});
+
+test("smoke falls back to a redacted hand-authored fixture when no episodes are recorded", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-smoke-empty-"));
+  const client: ModelClient = {
+    async complete() {
+      return { content: JSON.stringify({ path: "f.ts", edits: [{ oldText: "a", newText: "b" }] }), tokens: 10, latencyMs: 3, provider: "mock", model: "mock-model" };
+    },
+  };
+  const reportPath = path.join(root, "smoke-report.md");
+
+  const result = await runSmoke({ apiKey: "", client, logDir: path.join(root, "does-not-exist"), reportPath });
+
+  assert.equal(result.ran, true);
+  assert.equal(result.datasetSource, "fallback-fixture");
+  const report = await readFile(reportPath, "utf8");
+  assert.match(report, /fallback-fixture/);
+  assert.match(report, /episodes: 3/);
+
+  // Zero-content guarantee: fixture carries only structural metadata.
+  const serialized = JSON.stringify(FALLBACK_EPISODES);
+  for (const field of ["errorText", "content", "command\":", "oldText", "newText", "path\":", "prompt"]) {
+    assert.ok(!serialized.includes(field), `fixture must not contain ${field}`);
+  }
+  assert.ok(FALLBACK_EPISODES.length >= 1);
+  assert.ok(FALLBACK_EPISODES.every((episode) => episode.sessionId === "fixture"));
 });

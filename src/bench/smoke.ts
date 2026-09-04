@@ -18,6 +18,17 @@ import { readEvents, listSessionLogs } from "../recorder/log.ts";
 
 export const DEFAULT_SMOKE_REPORT = path.resolve(".tmp", "bench-smoke-report.md");
 export const DEFAULT_SMOKE_MODEL = "google/gemini-2.5-flash";
+
+/**
+ * Hand-authored, zero-content fallback episodes used when no recorded
+ * episodes exist — structural metadata only (action names, input key names),
+ * so the smoke run always has a bounded, redacted population.
+ */
+export const FALLBACK_EPISODES: readonly BenchEpisode[] = [
+  { episodeId: "fixture-1", kind: "repair-warning", sessionId: "fixture", toolName: "edit", repairs: ["nest-edit-fields"], inputKeys: ["edits"], outcome: "repaired-recurrence" },
+  { episodeId: "fixture-2", kind: "repair-warning", sessionId: "fixture", toolName: "edit", repairs: ["wrap-array"], inputKeys: ["edits"], outcome: "failed" },
+  { episodeId: "fixture-3", kind: "repair-warning", sessionId: "fixture", toolName: "bash", repairs: ["parse-json"], inputKeys: ["command"], outcome: "valid" },
+];
 const DEFAULT_SMOKE_CAPS: RunnerCaps = {
   timeoutMs: 30_000,
   retryCap: 2,
@@ -75,6 +86,8 @@ export interface SmokeResult {
   ran: boolean;
   reason?: string;
   reportPath?: string;
+  datasetSource?: "recorded" | "fallback-fixture";
+  episodes?: number;
 }
 
 export async function runSmoke(options: SmokeOptions = {}): Promise<SmokeResult> {
@@ -82,7 +95,9 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<SmokeResult>
   if (!options.client && !apiKey) return { ran: false, reason: "missing-credentials" };
 
   const client = options.client ?? createOpenRouterClient(apiKey!);
-  const dataset = options.dataset ?? await loadLocalEpisodes(options.logDir ?? path.resolve(".pi", "welder-log"));
+  const recorded = await loadLocalEpisodes(options.logDir ?? path.resolve(".pi", "welder-log"));
+  const dataset = recorded.length > 0 ? recorded : FALLBACK_EPISODES;
+  const datasetSource = recorded.length > 0 ? "recorded" as const : "fallback-fixture" as const;
   const caps = options.caps ?? DEFAULT_SMOKE_CAPS;
   const reportPath = options.reportPath ?? DEFAULT_SMOKE_REPORT;
 
@@ -94,6 +109,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<SmokeResult>
     "",
     "Output mode: text-json — label distribution may differ from native tool calls; not production proof (contract v2).",
     "",
+    `dataset: ${datasetSource} (${dataset.length} episodes)`,
     `caps: timeoutMs=${caps.timeoutMs} retryCap=${caps.retryCap} concurrencyCap=${caps.concurrencyCap} costBudgetUsd=${caps.costBudgetUsd}`,
     `client: provider=${b1.provider || "unknown"} model=${b1.model || "unknown"} errorClass=${b1.errorClass}`,
     "",
@@ -109,7 +125,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<SmokeResult>
 
   await fs.mkdir(path.dirname(reportPath), { recursive: true });
   await fs.writeFile(reportPath, report, "utf8");
-  return { ran: true, reportPath };
+  return { ran: true, reportPath, datasetSource, episodes: dataset.length };
 }
 
 /** Load closed episode records from a welder log directory. */
