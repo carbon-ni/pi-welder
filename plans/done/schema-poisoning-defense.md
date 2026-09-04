@@ -1,7 +1,7 @@
 ---
 id: TASK-0005
 title: Add schema poisoning defense for provider requests
-status: doing
+status: done
 depends_on: []
 priority: normal
 tags: [schema, providers]
@@ -31,3 +31,6 @@ Sanitize outgoing provider request schemas for affected models before the model 
 ## Out of Scope
 - Repairing generated values post-hoc unless mined failures prove need.
 - Full schema rewriting beyond `pattern` anchors.
+
+## Decision
+Rejected from current evidence. Full-session and Welder scans found zero contaminated generated values or paired canonical retries; built-in Pi tools expose no schema `pattern` constraints. Although Pi 0.83.0 provides `before_provider_request`, rewriting provider schemas without a model-specific signal would be speculative and could change validation semantics. Revisit only with a mined contaminated-call and canonical-retry pair. Evidence: `.tmp/reports/04-09-26/task-0005-schema-poisoning-evidence.md`.
