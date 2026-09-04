@@ -1,7 +1,7 @@
 ---
 id: TASK-0008
 title: Build deterministic tool-call replay benchmark
-status: doing
+status: done
 depends_on: [TASK-0007]
 priority: high
 tags: [benchmark, replay, evaluation]
@@ -29,4 +29,6 @@ Use native tool-call output when target provider adapter supports it. If evaluat
 
 ## Notes
 A replay benchmark that cannot reproduce baseline behavior is not suitable for optimization.
+
+Completed deterministic replay harness with sealed holdout handling, side-effect-free validators, capped injected model client, and B0/B1 baselines. A bounded real-model smoke used three redacted fallback episodes and wrote `.tmp/bench-smoke-report.md`; this text-JSON run is sanity evidence, not production proof. Detailed evidence: `.tmp/reports/04-09-26/task-0008-replay-benchmark.md`.
 
