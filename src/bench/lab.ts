@@ -63,12 +63,15 @@ const WHY_PHRASES: ReadonlyMap<string, string> = new Map([
   ["parse-json", "so the command output is valid JSON"],
 ]);
 
-export function generateTemplateMessage(params: TemplateParams, episode: BenchEpisode): string {
+export function generateTemplateMessage(
+  params: TemplateParams,
+  episode: Pick<BenchEpisode, "kind" | "repairs"> & { inputKeys?: readonly string[] },
+): string {
   const header = params.header === "hint" ? "pi-welder repair hints: recent tool calls were repaired." : "pi-welder notice: deterministic repairs were applied.";
   const lines = episode.repairs.map((action) => {
     const bullet = params.bullet === "dash" ? "- " : "";
     const why = params.includeWhy ? ` ${WHY_PHRASES.get(action) ?? "so the retry succeeds"}` : "";
-    const keys = params.includeKeys && episode.inputKeys.length > 0 ? ` (input keys: ${episode.inputKeys.join(", ")})` : "";
+    const keys = params.includeKeys && episode.inputKeys && episode.inputKeys.length > 0 ? ` (input keys: ${episode.inputKeys.join(", ")})` : "";
     return `${bullet}${action}:${why}${keys}`;
   });
   return `${header}\n${lines.join("\n")}`;

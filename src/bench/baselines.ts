@@ -11,6 +11,7 @@ import { repairActionHint } from "../repair-warnings.ts";
 export interface CandidateEpisode {
   kind: "repair-warning" | "result-repair";
   repairs: string[];
+  inputKeys?: readonly string[];
 }
 
 export interface BenchCandidate {
