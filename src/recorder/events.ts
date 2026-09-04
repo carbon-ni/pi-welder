@@ -2,7 +2,7 @@ import type { Repair } from "../repairs/index.ts";
 
 export interface WelderEvent {
   ts: string;
-  eventType: "tool_call" | "tool_result";
+  eventType: "tool_call" | "tool_result" | "episode";
   toolName: string;
   provider: string;
   model: string;
@@ -12,6 +12,12 @@ export interface WelderEvent {
   wasError?: boolean;
   errorKind?: string;
   errorText?: string;
+  /** Episode-only fields (privacy-safe metadata, no content). */
+  episodeId?: string;
+  kind?: string;
+  outcome?: string;
+  window?: number;
+  unrelatedCalls?: number;
 }
 
 interface BuildEventInput {
@@ -58,6 +64,26 @@ export function buildToolResultEvent(input: BuildToolResultEventInput): WelderEv
     wasError: true,
     errorKind: classifyErrorKind(input.errorText),
     errorText: truncate(input.errorText, 500),
+  };
+}
+
+import type { EpisodeRecord } from "../episodes.ts";
+
+export function buildEpisodeEvent(record: EpisodeRecord, nowMs: number): WelderEvent {
+  return {
+    ts: new Date(nowMs).toISOString(),
+    eventType: "episode",
+    toolName: record.toolName,
+    provider: record.provider,
+    model: record.model,
+    repairs: record.repairs,
+    wasRepaired: false,
+    inputKeys: record.inputKeys,
+    episodeId: record.episodeId,
+    kind: record.kind,
+    outcome: record.outcome,
+    window: record.window,
+    unrelatedCalls: record.unrelatedCalls,
   };
 }
 

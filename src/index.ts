@@ -27,13 +27,13 @@ export default function (pi: ExtensionHost) {
 
   pi.on("session_start", async (_event, ctx) => handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION));
 
-  pi.on("session_shutdown", async (_event, ctx) => handleSessionShutdown(ctx));
+  pi.on("session_shutdown", async (_event, ctx) => handleSessionShutdown(runtime, ctx));
 
   pi.on("tool_call", async (event, ctx) => handleToolCall(runtime, event, ctx));
 
   pi.on("tool_result", async (event, ctx) => handleToolResult(runtime, event, ctx));
 
-  pi.on("context", async (event) => handleContext(runtime, event));
+  pi.on("context", async (event, ctx) => handleContext(runtime, event, ctx));
 
   registerWelderCommands(pi, runtime);
 }

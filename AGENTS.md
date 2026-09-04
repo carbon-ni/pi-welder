@@ -16,6 +16,7 @@ Use this file as the index. Read nested module guides before changing folder mod
 - `src/fields.ts`: field classification constants/predicates used by repair rules.
 - `src/infra/`: external adapters and injectable capability contracts for filesystem and Pi host access.
 - `src/recovery.ts`: failed-tool-result tracking and recovery guidance generation.
+- `src/episodes.ts`: pure guidance-episode correlation (repair warnings / result enrichment → next relevant call+result outcome); privacy-safe records, injectable clock/ids.
 - `src/repairs/`: pure repair core. See `src/repairs/AGENTS.md`.
 - `src/recorder/`: observability: stats, event schema, JSONL log I/O. See `src/recorder/AGENTS.md`.
 

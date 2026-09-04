@@ -12,6 +12,7 @@ import {
 } from "./repair-warnings.ts";
 import {
   appendEvent,
+  buildEpisodeEvent,
   buildEvent,
   buildToolResultEvent,
   pruneOldSessions,
@@ -21,6 +22,7 @@ import {
 } from "./recorder/index.ts";
 import { logDir, modelMeta, sessionId } from "./infra/pi/context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
+import type { EpisodeRecord } from "./episodes.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
 
@@ -45,8 +47,17 @@ export async function handleSessionStart(
   if (ctx.hasUI) ctx.ui.setStatus("welder", welderStatusText(runtime));
 }
 
-export async function handleSessionShutdown(ctx: WelderContext): Promise<void> {
+export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
+  await appendEpisodeRecords(runtime.episodes.closeAll(), ctx).catch(() => { /* never block shutdown */ });
   if (ctx.hasUI) ctx.ui.setStatus("welder", undefined);
+}
+
+async function appendEpisodeRecords(records: readonly EpisodeRecord[], ctx?: WelderContext): Promise<void> {
+  if (!ctx || records.length === 0) return;
+  const now = Date.now();
+  for (const record of records) {
+    await appendEvent(logDir(ctx), sessionId(ctx), buildEpisodeEvent(record, now)).catch(() => { /* logging never breaks tool flow */ });
+  }
 }
 
 export async function handleToolCall(
@@ -58,6 +69,7 @@ export async function handleToolCall(
   if (!input || typeof input !== "object") return undefined;
 
   const repair = repairToolInput(runtime, event.toolName, input as Record<string, unknown>);
+  const callActions = repair.repairs.map((r) => r.action);
   if (runtime.enabled && repair.repairs.length > 0) {
     applyRepairedInput(input as Record<string, unknown>, repair.result);
     recordRepairWarnings(runtime.repairWarnings, repair.repairs, event.toolName);
@@ -75,9 +87,12 @@ export async function handleToolCall(
       const repairs: Repair[] = Array.from({ length: preflight.repairedEdits }, (_, index) => ({ field: `edits[${index}].oldText`, action: "resolve-ambiguous-edit" }));
       recordRepairs(runtime.stats, repairs);
       recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
+      callActions.push("resolve-ambiguous-edit");
       await recordResultRepairEvent(ctx, event.toolName, input as Record<string, unknown>, repairs);
     }
   }
+
+  runtime.episodes.observeCall({ toolName: event.toolName, actions: callActions });
   return undefined;
 }
 
@@ -130,12 +145,24 @@ export async function handleToolResult(
   event: ToolResultEvent,
   ctx: WelderContext,
 ): Promise<ResultRepairPatch | undefined> {
+  // Correlate this result with episodes opened before the call was made.
+  const closedRecords = runtime.episodes.observeResult({ toolName: event.toolName, isError: event.isError === true });
+  await appendEpisodeRecords(closedRecords, ctx).catch(() => { /* logging never breaks results */ });
+
   const deterministicRepair = runtime.enabled
     ? await repairResult(event, ctx.cwd, resultRepairRules.filter((rule) => !runtime.disabledRepairs.has(rule.name)))
     : undefined;
   if (deterministicRepair) {
     recordRepairs(runtime.stats, deterministicRepair.repairs);
     await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, deterministicRepair.repairs);
+    const evicted = runtime.episodes.open({
+      kind: "result-repair",
+      toolName: event.toolName,
+      repairs: deterministicRepair.repairs,
+      ...modelMeta(ctx),
+      inputKeys: Object.keys(event.input ?? {}),
+    });
+    await appendEpisodeRecords(evicted, ctx).catch(() => { /* logging never breaks result repair */ });
     const repairedEvent = { ...event, ...deterministicRepair.patch };
     recordToolResult(runtime.recovery, repairedEvent);
     const errorText = extractToolErrorText(repairedEvent);
@@ -179,8 +206,10 @@ async function recordResultRepairEvent(
   })).catch(() => { /* logging never breaks result repair */ });
 }
 
-export async function handleContext(runtime: WelderRuntime, event: ContextEvent): Promise<{ messages: unknown[] } | undefined> {
+export async function handleContext(runtime: WelderRuntime, event: ContextEvent, ctx?: WelderContext): Promise<{ messages: unknown[] } | undefined> {
   const warningMessages = consumeRepairWarnings(runtime.repairWarnings);
   if (warningMessages.length === 0) return undefined;
+  const evicted = runtime.episodes.openWarnings(runtime.repairWarnings.warnings);
+  await appendEpisodeRecords(evicted, ctx).catch(() => { /* logging never breaks context */ });
   return { messages: [...event.messages, ...warningMessages] };
 }
