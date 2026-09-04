@@ -146,6 +146,13 @@ function failureHint(toolName: string, inputKeys: string[], errorText: string): 
   }
 
   const lower = errorText.toLowerCase();
+  if (toolName === "edit") {
+    const missingField = missingEditField(errorText);
+    if (missingField) {
+      const location = missingField.index === undefined ? "an edit entry" : `edits[${missingField.index}]`;
+      return `${location} is missing required ${missingField.field}; retry with the exact intended ${missingField.field} and do not invent content.`;
+    }
+  }
   if (toolName === "edit" && classifyErrorKind(errorText) === "EDIT_NOT_UNIQUE") {
     return "read a fresh snippet, then retry with exact oldText from the current file.";
   }
@@ -162,6 +169,26 @@ function failureHint(toolName: string, inputKeys: string[], errorText: string): 
     return "fix argument shape/types before retrying; do not repeat identical JSON.";
   }
   return "inspect the failure and retry with changed arguments.";
+}
+
+interface MissingEditField {
+  field: "oldText" | "newText";
+  index?: number;
+}
+
+function missingEditField(errorText: string): MissingEditField | undefined {
+  const requiredField = errorText.match(/\bmust have required propert(?:y|ies)\s*:?[ \t]*(oldText|newText)\b/i)?.[1]
+    ?? errorText.match(/\bmissing required\s+(oldText|newText)\b/i)?.[1]
+    ?? errorText.match(/\b(oldText|newText)\s+is\s+required\b/i)?.[1];
+  if (!requiredField) return undefined;
+
+  const pathMatch = errorText.match(/\bedits(?:\[(\d+)\]|[.](\d+))?[.]?(oldText|newText)\b/i);
+  const indexText = pathMatch?.[1] ?? pathMatch?.[2];
+  const field = (pathMatch?.[3] ?? requiredField).toLowerCase() === "oldtext" ? "oldText" : "newText";
+  return {
+    field,
+    index: indexText === undefined ? undefined : Number(indexText),
+  };
 }
 
 function isCrossToolBashShape(toolName: string, inputKeys: string[]): boolean {

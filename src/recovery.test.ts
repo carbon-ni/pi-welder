@@ -95,6 +95,46 @@ test("buildRecoveryGuidance uses included edit context before asking for another
   assert.doesNotMatch(guidance, /read/i);
 });
 
+test("buildRecoveryGuidance identifies missing nested edit fields", () => {
+  const cases = [
+    ["edits.2.newText: must have required properties newText", "edits[2]", "newText"],
+    ["edits[1].oldText: must have required properties oldText", "edits[1]", "oldText"],
+    ["must have required properties newText", "an edit entry", "newText"],
+    ["must have required properties oldText", "an edit entry", "oldText"],
+  ] as const;
+
+  for (const [errorText, location, field] of cases) {
+    const state = createRecoveryState();
+    recordToolResult(state, {
+      toolName: "edit",
+      input: { path: "file.ts", edits: [] },
+      isError: true,
+      content: errorText,
+    });
+
+    const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+    assert.ok(guidance.includes(location), guidance);
+    assert.match(guidance, new RegExp(`missing required ${field}`));
+    assert.match(guidance, /do not invent/i);
+  }
+});
+
+test("buildRecoveryGuidance keeps generic guidance for unrelated edit schema failures", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, {
+    toolName: "edit",
+    input: { path: "file.ts" },
+    isError: true,
+    content: "Validation failed for tool \"edit\": path is required",
+  });
+
+  const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+  assert.match(guidance, /inspect the failure/i);
+  assert.doesNotMatch(guidance, /missing required (?:oldText|newText)/i);
+});
+
 test("buildRecoveryGuidance asks for fresh context for duplicate text wording", () => {
   const state = createRecoveryState();
   recordToolResult(state, {
