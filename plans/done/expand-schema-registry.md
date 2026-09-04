@@ -1,7 +1,7 @@
 ---
 id: TASK-0003
 title: Expand schema registry and aliases from evidence
-status: doing
+status: done
 depends_on: [TASK-0002]
 priority: normal
 tags: [schema, repairs]
@@ -30,3 +30,5 @@ Expand schema-aware validation only where real failures show repeated malformed 
 
 ## Notes
 Prefer one source of truth in `src/schemas.ts`. Do not duplicate aliases in repair rules.
+
+Completed from evidence: 13 unique failed builtin edit calls used nested aliases or extra properties, and all 13 succeeded after canonical retry. Existing deterministic nested rules are now activated by schema repair signals; missing content remains unfilled. Evidence: `.tmp/reports/04-09-26/task-0003-edit-alias-repair.md`.
