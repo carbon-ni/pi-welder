@@ -149,7 +149,7 @@ test("tool_call repairs inject repair warnings into next context", async () => {
   assert.match(out.messages[1].content, /wrap-object-array/);
 });
 
-test("tool_call repairs + tool_result failures inject both into same context", async () => {
+test("tool_call repairs inject warnings without generic failure guidance", async () => {
   const c = loadExtension();
   const cx = ctx();
   await c.handlers["session_start"]!({}, cx);
@@ -166,10 +166,9 @@ test("tool_call repairs + tool_result failures inject both into same context", a
   }, cx);
 
   const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
-  // user message + recovery guidance + repair warnings = 3
-  assert.equal(out.messages.length, 3);
-  assert.match(out.messages[1].content, /pi-welder recovery hints/);
-  assert.match(out.messages[2].content, /pi-welder repair hints/);
+  // user message + repair warnings; generic failure guidance is not injected.
+  assert.equal(out.messages.length, 2);
+  assert.match(out.messages[1].content, /pi-welder repair hints/);
 });
 
 test("context returns undefined when neither repairs nor failures", async () => {
@@ -181,7 +180,7 @@ test("context returns undefined when neither repairs nor failures", async () => 
   assert.equal(out, undefined);
 });
 
-test("tool_result failures inject recovery guidance into next context", async () => {
+test("tool_result failures remain tracked without generic recovery guidance", async () => {
   const c = loadExtension();
   const cx = ctx();
   await c.handlers["session_start"]!({}, cx);
@@ -193,12 +192,10 @@ test("tool_result failures inject recovery guidance into next context", async ()
   }, cx);
 
   const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "retry" }] }, cx) as any;
-  assert.equal(out.messages.length, 2);
-  assert.match(out.messages[1].content, /pi-welder recovery hints/);
-  assert.match(out.messages[1].content, /read a fresh snippet/);
+  assert.equal(out, undefined);
 });
 
-test("successful tool_result clears guidance for that tool", async () => {
+test("successful tool_result clears tracked failure for that tool", async () => {
   const c = loadExtension();
   const cx = ctx();
   await c.handlers["session_start"]!({}, cx);
@@ -209,7 +206,7 @@ test("successful tool_result clears guidance for that tool", async () => {
   assert.equal(out, undefined);
 });
 
-test("context guidance is injected only once per unchanged failure snapshot", async () => {
+test("repeated failure contexts remain free of generic recovery guidance", async () => {
   const c = loadExtension();
   const cx = ctx();
   await c.handlers["session_start"]!({}, cx);
@@ -218,7 +215,7 @@ test("context guidance is injected only once per unchanged failure snapshot", as
   const first = await c.handlers["context"]!({ messages: [{ role: "user", content: "first" }] }, cx) as any;
   const second = await c.handlers["context"]!({ messages: [{ role: "user", content: "second" }] }, cx) as any;
 
-  assert.equal(first.messages.length, 2);
+  assert.equal(first, undefined);
   assert.equal(second, undefined);
 });
 

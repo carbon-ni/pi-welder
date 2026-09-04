@@ -1,9 +1,8 @@
 /**
- * Recovery guidance — turns recent tool failures into compact context hints.
+ * Failure tracking and explicit diagnostics for recent tool results.
  *
- * This does not block or mutate tools. It observes failing `tool_result` events
- * and injects one short system message on the next model context so the model
- * can recover without repeating the same bad call.
+ * This does not block or mutate tools. Automatic context handling records
+ * failures for stats and explicit diagnostic commands only.
  */
 
 export interface ToolResultLike {
@@ -23,7 +22,6 @@ export interface FailureRecord {
 export interface RecoveryState {
   failures: FailureRecord[];
   maxFailures: number;
-  deliveredSnapshot: string | null;
 }
 
 export interface RecoveryMessage {
@@ -32,7 +30,7 @@ export interface RecoveryMessage {
 }
 
 export function createRecoveryState(maxFailures = 3): RecoveryState {
-  return { failures: [], maxFailures, deliveredSnapshot: null };
+  return { failures: [], maxFailures };
 }
 
 export function extractToolErrorText(result: Pick<ToolResultLike, "isError" | "content">): string {
@@ -63,7 +61,6 @@ export function recordToolResult(state: RecoveryState, result: ToolResultLike): 
 
   if (!errorText) {
     state.failures = state.failures.filter((f) => f.toolName !== result.toolName);
-    state.deliveredSnapshot = null;
     return;
   }
 
@@ -77,7 +74,6 @@ export function recordToolResult(state: RecoveryState, result: ToolResultLike): 
   if (state.failures.length > state.maxFailures) {
     state.failures = state.failures.slice(-state.maxFailures);
   }
-  state.deliveredSnapshot = null;
 }
 
 export function buildRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
@@ -108,17 +104,8 @@ export function recoveryFailuresSummary(state: RecoveryState): string {
   return lines.join("\n");
 }
 
-export function consumeRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
-  const snapshot = recoverySnapshot(state);
-  if (!snapshot || snapshot === state.deliveredSnapshot) return [];
-  const messages = buildRecoveryGuidance(state);
-  if (messages.length > 0) state.deliveredSnapshot = snapshot;
-  return messages;
-}
-
 export function clearRecovery(state: RecoveryState): void {
   state.failures = [];
-  state.deliveredSnapshot = null;
 }
 
 export function setRecoveryLimit(state: RecoveryState, limit: number): void {
@@ -131,7 +118,6 @@ export function setRecoveryLimit(state: RecoveryState, limit: number): void {
 
   state.maxFailures = limit;
   state.failures = state.failures.slice(-limit);
-  state.deliveredSnapshot = null;
 }
 
 function firstLine(value: string): string {
@@ -153,13 +139,6 @@ function failureHint(errorText: string): string {
     return "fix argument shape/types before retrying; do not repeat identical JSON.";
   }
   return "inspect the failure and retry with changed arguments.";
-}
-
-function recoverySnapshot(state: RecoveryState): string {
-  if (state.failures.length === 0) return "";
-  return state.failures
-    .map((f) => [f.toolName, f.ts, f.errorText].join("\0"))
-    .join("\0\0");
 }
 
 function truncate(value: string, max: number): string {

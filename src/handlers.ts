@@ -3,7 +3,6 @@ import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.
 import { repairToolResult as repairResult, resultRepairRules, type ResultRepairPatch } from "./result-repairs/index.ts";
 import { preflightEditMismatch } from "./model-recovery/edit-mismatch.ts";
 import {
-  consumeRecoveryGuidance,
   extractToolErrorText,
   recordToolResult,
 } from "./recovery.ts";
@@ -181,9 +180,7 @@ async function recordResultRepairEvent(
 }
 
 export async function handleContext(runtime: WelderRuntime, event: ContextEvent): Promise<{ messages: unknown[] } | undefined> {
-  const recoveryMessages = consumeRecoveryGuidance(runtime.recovery);
   const warningMessages = consumeRepairWarnings(runtime.repairWarnings);
-  const all = [...recoveryMessages, ...warningMessages];
-  if (all.length === 0) return undefined;
-  return { messages: [...event.messages, ...all] };
+  if (warningMessages.length === 0) return undefined;
+  return { messages: [...event.messages, ...warningMessages] };
 }

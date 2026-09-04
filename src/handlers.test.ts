@@ -220,7 +220,7 @@ test("repairStatusText summarizes first repairs and remaining count", () => {
   );
 });
 
-test("handleContext injects recovery guidance through explicit runtime", async () => {
+test("handleContext does not inject generic recovery guidance", async () => {
   const runtime = createRuntime();
   await handleToolResult(
     runtime,
@@ -230,9 +230,8 @@ test("handleContext injects recovery guidance through explicit runtime", async (
 
   const out = await handleContext(runtime, { messages: [{ role: "user", content: "retry" }] } as any);
 
-  const guidance = out?.messages[1] as { content?: unknown } | undefined;
-  assert.equal(out?.messages.length, 2);
-  assert.match(String(guidance?.content), /read a fresh snippet/);
+  assert.equal(out, undefined);
+  assert.equal(runtime.recovery.failures.length, 1);
 });
 
 test("handleToolResult passes edit mismatch failures through unchanged", async () => {
@@ -262,7 +261,7 @@ test("handleToolCall records repair warnings in runtime", async () => {
   assert.equal(runtime.repairWarnings.warnings[0]?.toolName, "edit");
 });
 
-test("handleContext injects repair warnings alongside recovery guidance", async () => {
+test("handleContext injects repair warnings without generic recovery guidance", async () => {
   const runtime = createRuntime();
 
   // Trigger a repair
@@ -281,12 +280,10 @@ test("handleContext injects repair warnings alongside recovery guidance", async 
 
   const out = await handleContext(runtime, { messages: [{ role: "user", content: "retry" }] } as any);
 
-  // Original + recovery + repair warnings = 3 messages
-  assert.equal(out?.messages.length, 3);
+  // Original + repair warnings; generic recovery guidance is not injected.
+  assert.equal(out?.messages.length, 2);
 
-  const recovery = out?.messages[1] as { content?: string };
-  const warnings = out?.messages[2] as { content?: string };
-  assert.match(String(recovery?.content), /pi-welder recovery hints/);
+  const warnings = out?.messages[1] as { content?: string };
   assert.match(String(warnings?.content), /pi-welder repair hints/);
   assert.match(String(warnings?.content), /wrap-object-array/);
 });

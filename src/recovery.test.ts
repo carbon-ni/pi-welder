@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   buildRecoveryGuidance,
   clearRecovery,
-  consumeRecoveryGuidance,
   createRecoveryState,
   extractToolErrorText,
   recordToolResult,
@@ -95,36 +94,13 @@ test("buildRecoveryGuidance uses included edit context before asking for another
   assert.doesNotMatch(guidance, /read/i);
 });
 
-test("consumeRecoveryGuidance injects once for an unchanged failure snapshot", () => {
-  const state = createRecoveryState();
-  recordToolResult(state, { toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT" });
-
-  const first = consumeRecoveryGuidance(state);
-  const second = consumeRecoveryGuidance(state);
-
-  assert.equal(first.length, 1);
-  assert.deepEqual(second, []);
-});
-
-test("consumeRecoveryGuidance injects again when a new failure arrives", () => {
+test("clearRecovery removes failures", () => {
   const state = createRecoveryState();
   recordToolResult(state, { toolName: "read", input: {}, isError: true, content: "ENOENT" });
-  assert.equal(consumeRecoveryGuidance(state).length, 1);
-  assert.equal(consumeRecoveryGuidance(state).length, 0);
-
-  recordToolResult(state, { toolName: "edit", input: {}, isError: true, content: "EDIT_MISMATCH" });
-  assert.equal(consumeRecoveryGuidance(state).length, 1);
-});
-
-test("clearRecovery removes failures and delivered snapshot", () => {
-  const state = createRecoveryState();
-  recordToolResult(state, { toolName: "read", input: {}, isError: true, content: "ENOENT" });
-  assert.equal(consumeRecoveryGuidance(state).length, 1);
 
   clearRecovery(state);
 
   assert.equal(state.failures.length, 0);
-  assert.equal(state.deliveredSnapshot, null);
   assert.deepEqual(buildRecoveryGuidance(state), []);
 });
 
@@ -138,7 +114,6 @@ test("setRecoveryLimit updates limit and trims older failures", () => {
 
   assert.equal(state.maxFailures, 2);
   assert.deepEqual(state.failures.map((f) => f.toolName), ["two", "three"]);
-  assert.equal(state.deliveredSnapshot, null);
 });
 
 test("setRecoveryLimit rejects unsafe limits", () => {
