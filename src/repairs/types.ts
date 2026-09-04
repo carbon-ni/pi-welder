@@ -1,25 +1,28 @@
-export type RepairAction =
-  | "strip-null"
-  | "strip-null-like"
-  | "clean-path"
-  | "parse-json"
-  | "wrap-array"
-  | "wrap-object-array"
-  | "split-string"
-  | "coerce-boolean"
-  | "coerce-number"
-  | "strip-extra-props"
-  | "rename-edit-item-alias"
-  | "drop-noop-edit"
-  | "rename-aliased-field"
-  | "relational-default"
-  | "nest-edit-fields"
-  | "merge-edit-anchor"
-  | "directory-read"
-  | "missing-read-context"
-  | "read-offset-context"
-  | "edit-noop"
-  | "resolve-ambiguous-edit";
+export const REPAIR_ACTIONS = [
+  "strip-null",
+  "strip-null-like",
+  "clean-path",
+  "parse-json",
+  "wrap-array",
+  "wrap-object-array",
+  "split-string",
+  "coerce-boolean",
+  "coerce-number",
+  "strip-extra-props",
+  "rename-edit-item-alias",
+  "drop-noop-edit",
+  "rename-aliased-field",
+  "relational-default",
+  "nest-edit-fields",
+  "merge-edit-anchor",
+  "directory-read",
+  "missing-read-context",
+  "read-offset-context",
+  "edit-noop",
+  "resolve-ambiguous-edit",
+] as const;
+
+export type RepairAction = (typeof REPAIR_ACTIONS)[number];
 
 export interface Repair {
   field: string;

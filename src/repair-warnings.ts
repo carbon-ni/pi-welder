@@ -78,6 +78,11 @@ const HINT_MAP: ReadonlyMap<RepairAction, string> = new Map([
   ["resolve-ambiguous-edit", "read current file text before composing exact replacements"],
 ]);
 
+/** Shipped hint text for an action, if any (warnings cover a subset). */
+export function repairActionHint(action: string): string | undefined {
+  return HINT_MAP.get(action as RepairAction);
+}
+
 export function buildRepairWarnings(state: RepairWarningState): RepairWarningMessage[] {
   if (state.warnings.length === 0) return [];
 
