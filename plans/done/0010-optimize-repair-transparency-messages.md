@@ -1,7 +1,7 @@
 ---
 id: TASK-0010
 title: Optimize repair transparency messages
-status: doing
+status: done
 depends_on: [TASK-0008, TASK-0009]
 priority: high
 tags: [dspy, guidance, experiment]
@@ -33,4 +33,6 @@ Generic recovery and messages for repair-free failures are structurally ineligib
 
 ## Notes
 A shorter message or no message is a valid winner.
+
+Completed as an explicit no-go: current logs contain zero closed real episodes, below the contract threshold of 30 sealed-holdout episodes per repair-action cluster. The offline experiment and sufficiency gate are ready to rerun after evidence accrues; no runtime message changed. Evidence: `.tmp/reports/04-09-26/task-0010-transparency-experiment.md`.
 
