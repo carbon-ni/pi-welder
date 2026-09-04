@@ -24,11 +24,6 @@ export interface RecoveryState {
   maxFailures: number;
 }
 
-export interface RecoveryMessage {
-  role: "system";
-  content: string;
-}
-
 export function createRecoveryState(maxFailures = 3): RecoveryState {
   return { failures: [], maxFailures };
 }
@@ -76,23 +71,6 @@ export function recordToolResult(state: RecoveryState, result: ToolResultLike): 
   }
 }
 
-export function buildRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
-  if (state.failures.length === 0) return [];
-
-  const lines = [
-    "pi-welder recovery hints: recent tool calls failed. Before retrying, change strategy instead of repeating the same call.",
-  ];
-
-  for (const failure of state.failures) {
-    lines.push(`- ${failure.toolName} failed: ${firstLine(failure.errorText)}`);
-    const hint = failureHint(failure.errorText);
-    if (hint) lines.push(`  hint: ${hint}`);
-    if (failure.inputKeys.length > 0) lines.push(`  input keys: ${failure.inputKeys.join(", ")}`);
-  }
-
-  return [{ role: "system", content: lines.join("\n") }];
-}
-
 export function recoveryFailuresSummary(state: RecoveryState): string {
   if (state.failures.length === 0) return "pi-welder: no pending recovery failures";
 
@@ -122,23 +100,6 @@ export function setRecoveryLimit(state: RecoveryState, limit: number): void {
 
 function firstLine(value: string): string {
   return truncate(value.split(/\r?\n/)[0] ?? value, 220);
-}
-
-function failureHint(errorText: string): string {
-  const lower = errorText.toLowerCase();
-  if (lower.includes("current context edits[")) {
-    return "retry with exact oldText from included context.";
-  }
-  if (lower.includes("edit_mismatch") || lower.includes("oldtext") || lower.includes("not found")) {
-    return "read a fresh snippet, then retry with exact oldText from the current file.";
-  }
-  if (lower.includes("enoent") || lower.includes("no such file") || lower.includes("not a directory")) {
-    return "verify the path from the current workspace before retrying.";
-  }
-  if (lower.includes("schema") || lower.includes("invalid") || lower.includes("expected")) {
-    return "fix argument shape/types before retrying; do not repeat identical JSON.";
-  }
-  return "inspect the failure and retry with changed arguments.";
 }
 
 function truncate(value: string, max: number): string {

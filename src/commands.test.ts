@@ -17,11 +17,10 @@ function ctx(overrides: Partial<any> = {}): any {
 
 const expectedCommands = [
   ["welder-stats", "Show pi-welder repair stats for this session"],
-  ["welder-reset", "Reset pi-welder session stats and pending recovery guidance"],
+  ["welder-reset", "Reset pi-welder session stats and pending failures"],
   ["welder-log", "Show the path to this session's welder repair log"],
-  ["welder-guidance", "Show current pi-welder recovery guidance from recent tool failures"],
-  ["welder-failures", "Show pending pi-welder tool failures without recovery hints"],
-  ["welder-clear", "Clear pending pi-welder recovery guidance"],
+  ["welder-failures", "Show pending pi-welder tool failures and input keys"],
+  ["welder-clear", "Clear pending pi-welder failures"],
   ["welder-settings", "Toggle pi-welder config options (TUI)"],
 ];
 

@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildRecoveryGuidance,
   clearRecovery,
   createRecoveryState,
   extractToolErrorText,
@@ -57,43 +56,6 @@ test("recordToolResult clears failures for a tool after a successful retry", () 
   assert.deepEqual(state.failures.map((f) => f.toolName), ["edit"]);
 });
 
-test("buildRecoveryGuidance returns no messages when there are no failures", () => {
-  assert.deepEqual(buildRecoveryGuidance(createRecoveryState()), []);
-});
-
-test("buildRecoveryGuidance injects compact tool-failure guidance", () => {
-  const state = createRecoveryState();
-  recordToolResult(state, {
-    toolName: "edit",
-    input: { path: "a.ts", oldText: "missing text" },
-    isError: true,
-    content: "EDIT_MISMATCH: oldText not found in file",
-  });
-
-  const messages = buildRecoveryGuidance(state);
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0]?.role, "system");
-  assert.match(messages[0]?.content ?? "", /pi-welder recovery hints/);
-  assert.match(messages[0]?.content ?? "", /edit/);
-  assert.match(messages[0]?.content ?? "", /EDIT_MISMATCH/);
-  assert.match(messages[0]?.content ?? "", /read a fresh snippet/i);
-});
-
-test("buildRecoveryGuidance uses included edit context before asking for another read", () => {
-  const state = createRecoveryState();
-  recordToolResult(state, {
-    toolName: "edit",
-    input: { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] },
-    isError: true,
-    content: "oldText must match exactly\n\nCurrent context edits[0] lines 1-3 (1/1):\nconst x = 1;",
-  });
-
-  const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
-
-  assert.match(guidance, /retry with exact oldText from included context/i);
-  assert.doesNotMatch(guidance, /read/i);
-});
-
 test("clearRecovery removes failures", () => {
   const state = createRecoveryState();
   recordToolResult(state, { toolName: "read", input: {}, isError: true, content: "ENOENT" });
@@ -101,7 +63,6 @@ test("clearRecovery removes failures", () => {
   clearRecovery(state);
 
   assert.equal(state.failures.length, 0);
-  assert.deepEqual(buildRecoveryGuidance(state), []);
 });
 
 test("setRecoveryLimit updates limit and trims older failures", () => {

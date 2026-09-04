@@ -43,9 +43,10 @@ test("factory registers tool_call/tool_result/context + session handlers and all
   assert.ok(c.handlers["tool_result"], "tool_result handler registered");
   assert.ok(c.handlers["context"], "context handler registered");
   assert.ok(c.handlers["session_start"], "session_start handler registered");
-  for (const cmd of ["welder-stats", "welder-reset", "welder-log", "welder-guidance", "welder-failures", "welder-clear", "welder-settings"]) {
+  for (const cmd of ["welder-stats", "welder-reset", "welder-log", "welder-failures", "welder-clear", "welder-settings"]) {
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
+  assert.equal(c.commands["welder-guidance"], undefined);
 });
 
 test("tool_call mutates event.input in place with repairs", async () => {
@@ -219,18 +220,7 @@ test("repeated failure contexts remain free of generic recovery guidance", async
   assert.equal(second, undefined);
 });
 
-test("welder-guidance command surfaces current recovery hints", async () => {
-  const c = loadExtension();
-  let shown = "";
-  const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
-  await c.handlers["session_start"]!({}, cx);
-  await c.handlers["tool_result"]!({ toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT" }, cx);
-  await c.commands["welder-guidance"]!.handler("", cx);
-  assert.match(shown, /pi-welder recovery hints/);
-  assert.match(shown, /verify the path/);
-});
-
-test("welder-failures command surfaces pending failures without guidance hints", async () => {
+test("welder-failures command surfaces factual pending failures", async () => {
   const c = loadExtension();
   let shown = "";
   const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
@@ -244,7 +234,7 @@ test("welder-failures command surfaces pending failures without guidance hints",
   assert.doesNotMatch(shown, /hint:/);
 });
 
-test("welder-clear removes pending recovery guidance", async () => {
+test("welder-clear removes pending failures", async () => {
   const c = loadExtension();
   let shown = "";
   const cx = ctx({ ui: { notify: (m: string) => { shown = m; }, setStatus: () => {} } });
@@ -255,7 +245,7 @@ test("welder-clear removes pending recovery guidance", async () => {
 
   const out = await c.handlers["context"]!({ messages: [{ role: "user", content: "next" }] }, cx) as any;
   assert.equal(out, undefined);
-  assert.match(shown, /cleared/);
+  assert.match(shown, /cleared pending failures/);
 });
 
 test("failing tool_result writes JSONL failure event and updates stats", async () => {

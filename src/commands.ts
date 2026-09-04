@@ -6,7 +6,6 @@ import { loadWelderConfig, saveWelderConfig } from "./config.ts";
 import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { openWelderSettings } from "./infra/pi/settings-ui.ts";
 import {
-  buildRecoveryGuidance,
   clearRecovery,
   recoveryFailuresSummary,
   setRecoveryLimit,
@@ -117,11 +116,11 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
     },
     {
       name: "welder-reset",
-      description: "Reset pi-welder session stats and pending recovery guidance",
+      description: "Reset pi-welder session stats and pending failures",
       handler: async (_args, ctx) => {
         resetSessionState(runtime);
         runtime.stats.sessionId = sessionId(ctx);
-        ctx.ui.notify("pi-welder: reset session stats and recovery state", "info");
+        ctx.ui.notify("pi-welder: reset session stats and failure state", "info");
       },
     },
 {
@@ -132,26 +131,18 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
       },
     },
     {
-      name: "welder-guidance",
-      description: "Show current pi-welder recovery guidance from recent tool failures",
-      handler: async (_args, ctx) => {
-        const messages = buildRecoveryGuidance(runtime.recovery);
-        ctx.ui.notify(messages[0]?.content ?? "pi-welder: no recent tool failures", "info");
-      },
-    },
-    {
       name: "welder-failures",
-      description: "Show pending pi-welder tool failures without recovery hints",
+      description: "Show pending pi-welder tool failures and input keys",
       handler: async (_args, ctx) => {
         ctx.ui.notify(recoveryFailuresSummary(runtime.recovery), "info");
       },
     },
     {
       name: "welder-clear",
-      description: "Clear pending pi-welder recovery guidance",
+      description: "Clear pending pi-welder failures",
       handler: async (_args, ctx) => {
         clearRecovery(runtime.recovery);
-        ctx.ui.notify("pi-welder: cleared pending recovery guidance", "info");
+        ctx.ui.notify("pi-welder: cleared pending failures", "info");
       },
     },
     {

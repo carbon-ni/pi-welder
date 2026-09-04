@@ -42,8 +42,8 @@ export function welderSettingItems(config: WelderConfig): WelderSettingItem[] {
     },
     {
       id: "recoveryGuidanceLimit",
-      label: "Recovery guidance limit",
-      description: "Max recent tool failures included in recovery hints",
+      label: "Failure history limit",
+      description: "Max recent tool failures retained for explicit diagnostics",
       currentValue: String(config.recoveryGuidanceLimit),
       values: [...LIMIT_VALUES],
     },
