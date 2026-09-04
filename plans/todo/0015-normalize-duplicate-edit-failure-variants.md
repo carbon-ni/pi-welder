@@ -1,7 +1,7 @@
 ---
 id: TASK-0015
 title: Normalize duplicate edit failure variants
-status: todo
+status: doing
 depends_on: []
 priority: high
 tags: [edit, recovery, observability]
