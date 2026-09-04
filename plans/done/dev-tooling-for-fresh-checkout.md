@@ -1,7 +1,7 @@
 ---
 id: TASK-0001
 title: Make lint work from fresh checkout
-status: doing
+status: done
 depends_on: []
 priority: normal
 tags: [tooling]
@@ -29,3 +29,5 @@ Choose one explicit path:
 
 ## Notes
 Keep tooling minimal. Do not introduce build step; Pi loads TypeScript source directly.
+
+Completed with exact-pinned `typescript@5.9.3`. An isolated clean checkout reproduced missing `tsc`; a second clean checkout passed `npm ci`, lint, tests, and check. Evidence: `.tmp/reports/04-09-26/task-0001-dev-tooling.md`.
