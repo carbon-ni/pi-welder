@@ -1,3 +1,5 @@
+import { classifyErrorKind } from "./recorder/events.ts";
+
 /**
  * Recovery guidance — turns recent tool failures into compact context hints.
  *
@@ -144,6 +146,9 @@ function failureHint(toolName: string, inputKeys: string[], errorText: string): 
   }
 
   const lower = errorText.toLowerCase();
+  if (toolName === "edit" && classifyErrorKind(errorText) === "EDIT_NOT_UNIQUE") {
+    return "read a fresh snippet, then retry with exact oldText from the current file.";
+  }
   if (lower.includes("current context edits[")) {
     return "retry with exact oldText from included context.";
   }

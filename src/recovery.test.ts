@@ -95,6 +95,21 @@ test("buildRecoveryGuidance uses included edit context before asking for another
   assert.doesNotMatch(guidance, /read/i);
 });
 
+test("buildRecoveryGuidance asks for fresh context for duplicate text wording", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, {
+    toolName: "edit",
+    input: { path: "file.ts", edits: [{ oldText: "x", newText: "y" }] },
+    isError: true,
+    content: "Found 2 occurrences of the text in file.ts. The text must be unique.",
+  });
+
+  const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+  assert.match(guidance, /read a fresh snippet, then retry with exact oldText/i);
+  assert.doesNotMatch(guidance, /choose|occurrence 1|occurrence 2/i);
+});
+
 test("buildRecoveryGuidance targets bash when read receives bash-shaped args", () => {
   const state = createRecoveryState();
   recordToolResult(state, {

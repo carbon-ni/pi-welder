@@ -6,6 +6,7 @@ import { classifyErrorKind } from "./events.ts";
 test("classifyErrorKind distinguishes deterministic edit failures", () => {
   const examples = [
     ["Found 2 occurrences of edits[0]. Each oldText must be unique.", "EDIT_NOT_UNIQUE"],
+    ["Found 2 occurrences of the text in file.ts. The text must be unique.", "EDIT_NOT_UNIQUE"],
     ["Could not find edits[0]. The oldText must match exactly.", "EDIT_NOT_FOUND"],
     ["No changes made. The replacement produced identical content.", "EDIT_NOOP"],
     ["edits[1] and edits[2] overlap in file.ts.", "EDIT_OVERLAP"],
@@ -16,6 +17,10 @@ test("classifyErrorKind distinguishes deterministic edit failures", () => {
   for (const [errorText, expected] of examples) {
     assert.equal(classifyErrorKind(errorText), expected, errorText);
   }
+});
+
+test("classifyErrorKind keeps unrelated occurrence errors generic", () => {
+  assert.equal(classifyErrorKind("Found 2 occurrences of a log line."), "TOOL_ERROR");
 });
 
 test("classifyErrorKind keeps explicit uppercase kinds authoritative", () => {

@@ -70,9 +70,7 @@ export function classifyErrorKind(errorText: string): string {
   if (lower.includes("validation failed for tool \"edit\"")) return "EDIT_INVALID_SHAPE";
   if (lower.includes("replacement produced identical content")) return "EDIT_NOOP";
   if (lower.includes("edits[") && lower.includes("overlap")) return "EDIT_OVERLAP";
-  if (lower.includes("oldtext") && (lower.includes("must be unique") || lower.includes("occurrences"))) {
-    return "EDIT_NOT_UNIQUE";
-  }
+  if (isDuplicateEditError(lower)) return "EDIT_NOT_UNIQUE";
   if (lower.includes("oldtext") && (lower.includes("could not find") || lower.includes("not found") || lower.includes("must match"))) {
     return "EDIT_NOT_FOUND";
   }
@@ -80,6 +78,16 @@ export function classifyErrorKind(errorText: string): string {
   if (lower.includes("edit_mismatch") || lower.includes("oldtext")) return "EDIT_MISMATCH";
   if (lower.includes("schema") || lower.includes("invalid") || lower.includes("expected")) return "SCHEMA";
   return "TOOL_ERROR";
+}
+
+function isDuplicateEditError(lowerErrorText: string): boolean {
+  const hasOldTextMarker = lowerErrorText.includes("oldtext");
+  const hasDuplicateMarker = lowerErrorText.includes("must be unique") || lowerErrorText.includes("occurrences");
+  if (hasOldTextMarker && hasDuplicateMarker) return true;
+
+  return lowerErrorText.includes("occurrences")
+    && lowerErrorText.includes("unique")
+    && lowerErrorText.includes("text");
 }
 
 function truncate(value: string, max: number): string {
