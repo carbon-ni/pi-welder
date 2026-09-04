@@ -1,5 +1,3 @@
-import { classifyErrorKind } from "./recorder/events.ts";
-
 /**
  * Recovery guidance — turns recent tool failures into compact context hints.
  *
@@ -91,7 +89,7 @@ export function buildRecoveryGuidance(state: RecoveryState): RecoveryMessage[] {
 
   for (const failure of state.failures) {
     lines.push(`- ${failure.toolName} failed: ${firstLine(failure.errorText)}`);
-    const hint = failureHint(failure.toolName, failure.inputKeys, failure.errorText);
+    const hint = failureHint(failure.errorText);
     if (hint) lines.push(`  hint: ${hint}`);
     if (failure.inputKeys.length > 0) lines.push(`  input keys: ${failure.inputKeys.join(", ")}`);
   }
@@ -140,22 +138,8 @@ function firstLine(value: string): string {
   return truncate(value.split(/\r?\n/)[0] ?? value, 220);
 }
 
-function failureHint(toolName: string, inputKeys: string[], errorText: string): string {
-  if (isCrossToolBashShape(toolName, inputKeys)) {
-    return `arguments contain bash-only fields; retry with bash instead of ${toolName} (do not rewrite command content)`;
-  }
-
+function failureHint(errorText: string): string {
   const lower = errorText.toLowerCase();
-  if (toolName === "edit") {
-    const missingField = missingEditField(errorText);
-    if (missingField) {
-      const location = missingField.index === undefined ? "an edit entry" : `edits[${missingField.index}]`;
-      return `${location} is missing required ${missingField.field}; retry with the exact intended ${missingField.field} and do not invent content.`;
-    }
-  }
-  if (toolName === "edit" && classifyErrorKind(errorText) === "EDIT_NOT_UNIQUE") {
-    return "read a fresh snippet, then retry with exact oldText from the current file.";
-  }
   if (lower.includes("current context edits[")) {
     return "retry with exact oldText from included context.";
   }
@@ -169,36 +153,6 @@ function failureHint(toolName: string, inputKeys: string[], errorText: string): 
     return "fix argument shape/types before retrying; do not repeat identical JSON.";
   }
   return "inspect the failure and retry with changed arguments.";
-}
-
-interface MissingEditField {
-  field: "oldText" | "newText";
-  index?: number;
-}
-
-function missingEditField(errorText: string): MissingEditField | undefined {
-  const requiredField = errorText.match(/\bmust have required propert(?:y|ies)\s*:?[ \t]*(oldText|newText)\b/i)?.[1]
-    ?? errorText.match(/\bmissing required\s+(oldText|newText)\b/i)?.[1]
-    ?? errorText.match(/\b(oldText|newText)\s+is\s+required\b/i)?.[1];
-  if (!requiredField) return undefined;
-
-  const pathMatch = errorText.match(/\bedits(?:\[(\d+)\]|[.](\d+))?[.]?(oldText|newText)\b/i);
-  const indexText = pathMatch?.[1] ?? pathMatch?.[2];
-  const field = (pathMatch?.[3] ?? requiredField).toLowerCase() === "oldtext" ? "oldText" : "newText";
-  return {
-    field,
-    index: indexText === undefined ? undefined : Number(indexText),
-  };
-}
-
-function isCrossToolBashShape(toolName: string, inputKeys: string[]): boolean {
-  if (toolName !== "read" && toolName !== "write") return false;
-  // `timeout` alone is also a plausible malformed read/write field. The
-  // command key is the stronger signal that the model intended to call bash.
-  if (!inputKeys.includes("command")) return false;
-
-  const required = toolName === "read" ? ["path"] : ["path", "content"];
-  return required.some((key) => !inputKeys.includes(key));
 }
 
 function recoverySnapshot(state: RecoveryState): string {
