@@ -1,7 +1,7 @@
 ---
 id: TASK-0005
 title: Add schema poisoning defense for provider requests
-status: todo
+status: doing
 depends_on: []
 priority: normal
 tags: [schema, providers]
