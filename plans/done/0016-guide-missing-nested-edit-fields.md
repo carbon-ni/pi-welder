@@ -1,7 +1,7 @@
 ---
 id: TASK-0016
 title: Guide missing nested edit fields
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [edit, schema, recovery]
@@ -23,5 +23,5 @@ Latest Luna-session mining found an edit entry missing `newText`. The schema err
 - [ ] Lint and package checks pass.
 
 ## Notes
-Repair structure only when intent is explicit; otherwise give precise retry guidance.
+Rejected after implementation: this changed guidance only and did not repair the failed call. The runtime behavior is removed by a forward corrective commit.
 

@@ -1,7 +1,7 @@
 ---
 id: TASK-0017
 title: Guide watcher socket configuration failures
-status: todo
+status: done
 depends_on: []
 priority: normal
 tags: [watcher, recovery, tooling]
@@ -23,5 +23,5 @@ Latest Luna-session mining found four watcher failures stating that `on.socket` 
 - [ ] Lint and package checks pass.
 
 ## Notes
-Confirm whether this guidance belongs in pi-welder or the watcher tool before adding duplicated policy.
+Rejected before implementation: this would add guidance only without repairing the watcher configuration failure. Any future fix belongs with watcher configuration or executable fallback behavior.
 
