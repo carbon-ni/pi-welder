@@ -1,7 +1,7 @@
 ---
 id: TASK-0011
 title: Optimize redacted structural few-shot examples
-status: todo
+status: done
 depends_on: [TASK-0008, TASK-0009]
 priority: normal
 tags: [dspy, few-shot, privacy]
@@ -28,4 +28,7 @@ Compare examples against prose-only guidance and no guidance. Avoid retrieval un
 
 ## Notes
 Prefer one canonical static example over AgentDB retrieval unless evidence shows retrieval wins.
+
+## Decision
+Rejected without implementation. TASK-0010 found zero closed real episodes, below the ≥30-per-cluster holdout gate. Structural few-shot examples would add generic context rather than factual action-specific evidence, conflicting with the current message policy. Revisit only after sufficient repair-bearing episodes and an approved contract change.
 

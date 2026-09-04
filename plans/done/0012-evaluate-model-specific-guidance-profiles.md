@@ -1,7 +1,7 @@
 ---
 id: TASK-0012
 title: Evaluate model-specific guidance profiles
-status: todo
+status: done
 depends_on: [TASK-0010, TASK-0011]
 priority: low
 tags: [models, guidance, overfitting]
@@ -26,4 +26,7 @@ Use global winner as baseline. Create provider/model profiles only for segments 
 
 ## Notes
 Model IDs change. Avoid permanent profiles based on one transient release.
+
+## Decision
+Rejected without implementation. TASK-0010 produced no global winner and insufficient real episodes; therefore there is no valid global baseline or adequately powered model segment to optimize. Revisit only after a global candidate passes the contract's sealed-holdout gate.
 

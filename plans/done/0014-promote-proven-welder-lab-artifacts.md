@@ -1,7 +1,7 @@
 ---
 id: TASK-0014
 title: Promote proven Welder Lab artifacts
-status: todo
+status: done
 depends_on: [TASK-0010, TASK-0011, TASK-0012]
 priority: normal
 tags: [adoption, runtime, rollback]
@@ -27,4 +27,7 @@ Review experiment evidence and promote only candidates that pass safety and hold
 
 ## Notes
 If no candidate beats baseline, successful outcome is keeping current behavior and preserving benchmark for future models.
+
+## Decision
+Completed with no promotion. TASK-0010 had insufficient real episodes and no winner; TASK-0011 and TASK-0012 were rejected. Runtime behavior remains unchanged. The versioned contract, replay benchmark, episode capture, and offline lab remain available for reevaluation after evidence reaches the declared threshold.
 
