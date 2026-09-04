@@ -1,7 +1,7 @@
 ---
 id: TASK-0018
 title: Remove generic automatic recovery messages
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [recovery, context, cleanup]
