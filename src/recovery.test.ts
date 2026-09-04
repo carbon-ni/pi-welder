@@ -95,6 +95,57 @@ test("buildRecoveryGuidance uses included edit context before asking for another
   assert.doesNotMatch(guidance, /read/i);
 });
 
+test("buildRecoveryGuidance targets bash when read receives bash-shaped args", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, {
+    toolName: "read",
+    input: { command: "rg pattern", timeout: 30 },
+    isError: true,
+    content: "Validation failed for tool \"read\": path is required",
+  });
+
+  const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+  assert.match(guidance, /retry with bash/i);
+  assert.match(guidance, /retry with bash instead of read/i);
+});
+
+test("buildRecoveryGuidance targets bash when write lacks required fields", () => {
+  const state = createRecoveryState();
+  recordToolResult(state, {
+    toolName: "write",
+    input: { command: "printf x", timeout: 30 },
+    isError: true,
+    content: "Validation failed for tool \"write\": path and content are required",
+  });
+
+  const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+  assert.match(guidance, /retry with bash/i);
+});
+
+test("buildRecoveryGuidance keeps generic guidance for unrelated read/write failures", () => {
+  for (const [toolName, input] of [
+    ["read", { path: "a.ts", command: "rg pattern" }],
+    ["write", { path: "a.ts", content: "x", timeout: 30 }],
+    ["read", { offset: 1 }],
+    ["write", { content: "x" }],
+  ] as const) {
+    const state = createRecoveryState();
+    recordToolResult(state, {
+      toolName,
+      input,
+      isError: true,
+      content: "Validation failed: unexpected field",
+    });
+
+    const guidance = buildRecoveryGuidance(state)[0]?.content ?? "";
+
+    assert.doesNotMatch(guidance, /retry with bash/i);
+    assert.match(guidance, /fix argument shape/i);
+  }
+});
+
 test("consumeRecoveryGuidance injects once for an unchanged failure snapshot", () => {
   const state = createRecoveryState();
   recordToolResult(state, { toolName: "read", input: { path: "missing.ts" }, isError: true, content: "ENOENT" });
