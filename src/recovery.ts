@@ -161,7 +161,9 @@ function failureHint(toolName: string, inputKeys: string[], errorText: string): 
 
 function isCrossToolBashShape(toolName: string, inputKeys: string[]): boolean {
   if (toolName !== "read" && toolName !== "write") return false;
-  if (!inputKeys.some((key) => key === "command" || key === "timeout")) return false;
+  // `timeout` alone is also a plausible malformed read/write field. The
+  // command key is the stronger signal that the model intended to call bash.
+  if (!inputKeys.includes("command")) return false;
 
   const required = toolName === "read" ? ["path"] : ["path", "content"];
   return required.some((key) => !inputKeys.includes(key));

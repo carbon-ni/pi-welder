@@ -130,6 +130,8 @@ test("buildRecoveryGuidance keeps generic guidance for unrelated read/write fail
     ["write", { path: "a.ts", content: "x", timeout: 30 }],
     ["read", { offset: 1 }],
     ["write", { content: "x" }],
+    ["read", { timeout: 30 }],
+    ["write", { path: "a.ts", timeout: 30 }],
   ] as const) {
     const state = createRecoveryState();
     recordToolResult(state, {
