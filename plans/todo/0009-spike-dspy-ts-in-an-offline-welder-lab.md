@@ -1,7 +1,7 @@
 ---
 id: TASK-0009
 title: Spike DSPy.ts in an offline Welder Lab
-status: todo
+status: doing
 depends_on: [TASK-0006]
 priority: high
 tags: [dspy, spike, offline]
@@ -13,7 +13,7 @@ tags: [dspy, spike, offline]
 The local DSPy.ts library exists, but its modules and text-oriented LM drivers are not yet proven against pi-welder's typed tool-call evaluation shape. A small spike must verify the integration and expose required adapter work before product code depends on it.
 
 ## Context
-Create smallest offline adapter around `.local/dspy.ts` or published `dspy.ts`. Keep it outside Pi extension runtime. Prove one seeded optimizer can improve a synthetic guidance task under Welder Lab metric.
+Create smallest offline adapter around `.local/dspy.ts` or published `dspy.ts`. Keep it outside Pi extension runtime. Prove one seeded optimizer can improve a synthetic repair-transparency or factual-enrichment task under the Welder Lab metric. Generic recovery guidance is ineligible.
 
 Investigate gap between DSPy.ts text generation and Pi/OpenRouter native tool-call responses before choosing dependency shape.
 
