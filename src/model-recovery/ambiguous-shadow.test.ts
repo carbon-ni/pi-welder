@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 
 import { buildAmbiguousShadowRequest, redactShadowText } from "./ambiguous-shadow.ts";
 
-function fileSystem(content: string) {
-  return { readFile: async () => content } as any;
+function fileSystem(content: string, realPath?: string | ((p: string) => Promise<string>)) {
+  const realpath = typeof realPath === "function" ? realPath : async (p: string) => realPath ?? p;
+  return { readFile: async () => content, realpath } as any;
 }
 
 const baseInput = {
@@ -67,4 +68,21 @@ test("fails closed when sanitization makes a candidate impossible to transmit", 
     sanitize: () => undefined,
   });
   assert.equal(result, undefined);
+});
+
+test("rejects paths outside cwd, the cwd root itself, and unreadable symlinks", async () => {
+  const contained = await buildAmbiguousShadowRequest({ cwd: "/repo", toolInput: baseInput, fileSystem: fileSystem("return value;\nreturn value;") });
+  assert.ok(contained);
+
+  const outside = fileSystem("return value;\nreturn value;", "/etc/passwd");
+  assert.equal(await buildAmbiguousShadowRequest({ cwd: "/repo", toolInput: baseInput, fileSystem: outside }), undefined);
+
+  const rootItself = fileSystem("return value;\nreturn value;", "/repo");
+  assert.equal(await buildAmbiguousShadowRequest({ cwd: "/repo", toolInput: { ...baseInput, path: "." }, fileSystem: rootItself }), undefined);
+
+  const noRealpath = { readFile: async () => "a\na" } as any;
+  assert.equal(await buildAmbiguousShadowRequest({ cwd: "/repo", toolInput: baseInput, fileSystem: noRealpath }), undefined);
+
+  const symlinkBreaks = { readFile: async () => "a\na", realpath: async () => Promise.reject(new Error("missing")) } as any;
+  assert.equal(await buildAmbiguousShadowRequest({ cwd: "/repo", toolInput: baseInput, fileSystem: symlinkBreaks }), undefined);
 });

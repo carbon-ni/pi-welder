@@ -71,3 +71,30 @@ test("real-model smoke (opt-in)", { skip: process.env.TYPESAFE_API_KEY && proces
   await mkdir(".tmp", { recursive: true });
   await appendFile(".tmp/jev-smoke.jsonl", `${JSON.stringify({ ts: new Date().toISOString(), status, latencyMs: Date.now() - started })}\n`);
 });
+
+test("TypeSafe client rejects redirects, oversized bodies, and treats 529 as rate-limited", async () => {
+  const captured: any[] = [];
+  const fetchMock = (status: number, body: string | (() => Response | Promise<Response>)) => async (url: any, init: any) => {
+    captured.push(init);
+    if (typeof body === "function") return body();
+    return new Response(body, { status });
+  };
+
+  await createTypeSafeJevClient({ apiKey: "k", fetch: fetchMock(200, JSON.stringify({ model: "m", answers: { selection: { type: "choice", choice: "abstain" } } })) } as any).choose(request, signal());
+  assert.equal(captured.at(-1).redirect, "error");
+
+  let limitedError: any;
+  try {
+    await createTypeSafeJevClient({ apiKey: "k", fetch: fetchMock(529, "overloaded") as any }).choose(request, signal());
+  } catch (error: any) { limitedError = error; }
+  assert.equal(limitedError?.kind, "rate-limited");
+
+  await assert.rejects(
+    createTypeSafeJevClient({ apiKey: "k", fetch: fetchMock(200, () => new Response(new Blob(["a".repeat(100 * 1024)]), { status: 200 })) } as any).choose(request, signal()),
+    /exceeded the byte cap/i,
+  );
+});
+
+function signal(): AbortSignal {
+  return new AbortController().signal;
+}

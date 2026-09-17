@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { FileSystem } from "../infra/filesystem.ts";
 import { nodeFileSystem } from "../infra/filesystem.ts";
 
@@ -40,7 +40,17 @@ export async function buildAmbiguousShadowRequest(
   const target = options.toolInput.path;
   if (typeof target !== "string") return undefined;
   const fileSystem = options.fileSystem ?? nodeFileSystem;
-  const current = await fileSystem.readFile(resolve(options.cwd, target)).catch(() => undefined);
+
+  // Symlink-safe containment: the file's real path must lie strictly inside
+  // the cwd's real path. Unreadable, escaping, or equal-to-root paths are
+  // never transmitted.
+  const realRoot = await fileSystem.realpath?.(resolve(options.cwd)).catch(() => undefined);
+  const realFile = await fileSystem.realpath?.(resolve(options.cwd, target)).catch(() => undefined);
+  if (!realRoot || !realFile) return undefined;
+  const withinRoot = relative(realRoot, realFile);
+  if (withinRoot === "" || withinRoot.startsWith("..") || isAbsolute(withinRoot)) return undefined;
+
+  const current = await fileSystem.readFile(realFile).catch(() => undefined);
   if (current === undefined || Buffer.byteLength(current, "utf8") > MAX_SOURCE_BYTES) return undefined;
 
   const offsets = occurrenceOffsets(current, parsed.oldText);

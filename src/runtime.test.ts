@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createRuntime, resetSessionState } from "./runtime.ts";
+import { createRuntime, resetSessionState, setSourceShadowingEnabled } from "./runtime.ts";
 
 test("createRuntime starts enabled with fresh stats and recovery", () => {
   const runtime = createRuntime();
@@ -50,4 +50,19 @@ test("resetSessionState resets stats and recovery while preserving guidance limi
   assert.equal(runtime.stats.totalToolCalls, 0);
   assert.equal(runtime.recovery.maxFailures, 7);
   assert.equal(runtime.recovery.failures.length, 0);
+});
+
+test("live source-shadowing toggle activates only when a client exists", () => {
+  const client = { choose: async () => ({ choice: null, confidence: 1 }) };
+  const runtime = createRuntime({ jevClient: client });
+  assert.equal(runtime.jevShadow, undefined);
+
+  setSourceShadowingEnabled(runtime, true);
+  assert.ok(runtime.jevShadow);
+  setSourceShadowingEnabled(runtime, false);
+  assert.equal(runtime.jevShadow, undefined);
+
+  const keyless = createRuntime();
+  setSourceShadowingEnabled(keyless, true);
+  assert.equal(keyless.jevShadow, undefined);
 });

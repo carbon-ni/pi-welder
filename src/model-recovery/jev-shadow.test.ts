@@ -139,3 +139,35 @@ test("labels only a uniquely correlated successful retry", async () => {
   unresolved.observeToolResult({ toolName: "edit", toolCallId: "wrong-id", isError: false });
   assert.equal(unresolvedEvidence.at(-1)?.labelStatus, "provisional-correct");
 });
+
+test("an ambiguous retry mapping to multiple candidates stays unlabeled", async () => {
+  const evidence: ShadowEvidence[] = [];
+  const shadow = createJevShadow({
+    client: { choose: async () => ({ choice: 1, confidence: 1 }) },
+    onEvidence: (record) => { evidence.push(record); },
+  });
+  assert.equal(shadow.submit(request("first")), true);
+  await shadow.drain();
+  assert.equal(shadow.submit(request("second")), true);
+  await shadow.drain();
+
+  // Both open selections share an identical candidate window: not unique.
+  shadow.observeToolCall({ toolName: "edit", toolCallId: "retry", path: "src/example.ts", oldText: "first candidate" });
+  shadow.observeToolResult({ toolName: "edit", toolCallId: "retry", isError: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(evidence.length, 2);
+  assert.ok(evidence.every((record) => record.labelStatus === "pending"));
+
+  // Same candidate window repeated within one selection is also not unique.
+  const twin = createJevShadow({
+    client: { choose: async () => ({ choice: 1, confidence: 1 }) },
+    onEvidence: (record) => { evidence.push(record); },
+  });
+  twin.submit({ ...request("twin"), candidates: [{ ordinal: 1, window: "same" }, { ordinal: 2, window: "same" }] });
+  await twin.drain();
+  twin.observeToolCall({ toolName: "edit", toolCallId: "twin-retry", path: "src/example.ts", oldText: "same" });
+  twin.observeToolResult({ toolName: "edit", toolCallId: "twin-retry", isError: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(evidence.length, 3);
+  assert.ok(evidence.every((record) => record.labelStatus === "pending"));
+});

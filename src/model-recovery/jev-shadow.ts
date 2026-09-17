@@ -172,19 +172,23 @@ export function createJevShadow(options: JevShadowOptions): JevShadow {
 
     observeToolCall(observation): void {
       if (observation.toolName !== "edit" || !observation.path || !observation.oldText) return;
+      if (pendingLabels.has(observation.toolCallId)) return; // never overwrite
       for (const selection of Array.from(selections)) {
         selection.callsLeft--;
         if (selection.callsLeft < 0) {
           selections.splice(selections.indexOf(selection), 1);
-          continue;
         }
-        if (selection.request.path !== observation.path) continue;
-        const matching = selection.request.candidates.filter(({ window }) =>
-          observation.oldText!.includes(window) || window.includes(observation.oldText!),
-        );
-        if (matching.length !== 1) continue;
-        pendingLabels.set(observation.toolCallId, { selection, actualOrdinal: matching[0]!.ordinal });
       }
+      // Exact, globally unique match only: the retry's oldText must equal
+      // exactly one open candidate window across all selections. Anything
+      // ambiguous or substring-based stays unlabeled.
+      const matches = selections
+        .filter((selection) => selection.request.path === observation.path)
+        .flatMap((selection) => selection.request.candidates
+          .filter((candidate) => candidate.window === observation.oldText)
+          .map((candidate) => ({ selection, actualOrdinal: candidate.ordinal })));
+      if (matches.length !== 1) return;
+      pendingLabels.set(observation.toolCallId, { selection: matches[0]!.selection, actualOrdinal: matches[0]!.actualOrdinal });
     },
 
     observeToolResult(observation): void {

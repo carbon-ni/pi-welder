@@ -28,9 +28,9 @@ export default function (pi: ExtensionHost) {
   const apiKey = process.env.TYPESAFE_API_KEY;
   const runtime = createRuntime({
     ...config,
-    // Source shadowing additionally requires an explicit API key; without it,
-    // no client exists and no request can ever leave the machine.
-    jevClient: config.sourceShadowingEnabled && apiKey ? createTypeSafeJevClient({ apiKey }) : undefined,
+    // Client exists whenever an API key is present, so the setting can be
+    // toggled on live; sourceShadowingEnabled alone controls actual use.
+    jevClient: apiKey ? createTypeSafeJevClient({ apiKey }) : undefined,
   });
 
   pi.on("session_start", async (_event, ctx) => handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION));

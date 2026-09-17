@@ -420,3 +420,34 @@ test("handleToolResult correlation labels a later successful edit", async () => 
     assert.doesNotMatch(json, /candidate body|src\/a\.ts/);
   }
 });
+
+test("persisted shadow JSONL events contain no source, paths, or edit text", async () => {
+  const content = "a\nreturn value;\nb\nc\na\nreturn value;\nb\nc";
+  const root = await mkdtemp(path.join(tmpdir(), "welder-shadow-jsonl-"));
+  await writeFile(path.join(root, "a.ts"), content);
+  const runtime = createRuntime({
+    sourceShadowingEnabled: true,
+    jevClient: { choose: async () => ({ choice: 2, confidence: 0.99, model: "jev-test" }) },
+  });
+  runtime.disabledRepairs = new Set(["resolve-ambiguous-edit"]);
+  await handleSessionStart(runtime, ctx({ cwd: root }));
+
+  await handleToolCall(runtime, { toolName: "edit", toolCallId: "c1", input: { path: "a.ts", edits: [{ oldText: "return value;", newText: "return nextValue; secret" }] } } as any, ctx({ cwd: root }));
+  await runtime.jevShadow!.drain();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const { readFile } = await import("node:fs/promises");
+  const logPath = path.join(root, ".pi", "welder-log", "handlers-test.jsonl");
+  const raw = await readFile(logPath, "utf8");
+  const events = raw.trim().split("\n").map((line) => JSON.parse(line));
+  const shadowEvents = events.filter((event) => event.eventType === "shadow");
+  assert.ok(shadowEvents.length >= 1);
+  for (const event of shadowEvents) {
+    const serialized = JSON.stringify(event);
+    assert.doesNotMatch(serialized, /return value|nextValue|a\.ts|secret/);
+    assert.deepEqual(
+      Object.keys(event).filter((key) => !["ts", "eventType", "toolName", "provider", "model", "repairs", "wasRepaired", "inputKeys"].includes(key)).sort(),
+      ["candidateCount", "confidence", "decisionModel", "labelStatus", "latencyMs", "outcome", "selectedOrdinal"].sort(),
+    );
+  }
+});

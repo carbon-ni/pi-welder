@@ -24,6 +24,39 @@ interface TypeSafeClientOptions {
   fetch?: typeof globalThis.fetch;
 }
 
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
+/** Reads the response body only up to a fixed byte cap; overflow fails closed. */
+async function readBoundedBody(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw transport("TypeSafe response body is unavailable");
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_RESPONSE_BYTES) {
+      void reader.cancel().catch(() => {});
+      throw transport("TypeSafe response exceeded the byte cap");
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+function transport(message: string): JevClientError {
+  const error = new Error(message) as JevClientError;
+  error.kind = "transport";
+  return error;
+}
+
 /** Thin injected adapter. Deterministic edit code depends only on JevClient. */
 export function createTypeSafeJevClient(options: TypeSafeClientOptions): JevClient {
   const request = options.fetch ?? globalThis.fetch;
@@ -61,27 +94,26 @@ export function createTypeSafeJevClient(options: TypeSafeClientOptions): JevClie
           },
           body: JSON.stringify(body),
           signal,
+          // Never follow redirects: the key must not be replayed elsewhere.
+          redirect: "error",
         });
       } catch (cause) {
         const error = new Error("TypeSafe request failed", { cause }) as JevClientError;
         error.kind = "transport";
         throw error;
       }
-      if (response.status === 429) {
+      if (response.status === 429 || response.status === 529) {
         const error = new Error("TypeSafe request was rate limited") as JevClientError;
         error.kind = "rate-limited";
         throw error;
       }
-      if (!response.ok) {
-        const error = new Error(`TypeSafe request failed with status ${response.status}`) as JevClientError;
-        error.kind = "transport";
-        throw error;
-      }
+      if (!response.ok) throw transport(`TypeSafe request failed with status ${response.status}`);
 
       let raw: unknown;
       try {
-        raw = await response.json();
+        raw = JSON.parse(await readBoundedBody(response));
       } catch (cause) {
+        if ((cause as Partial<JevClientError>)?.kind === "transport") throw cause;
         const error = new Error("TypeSafe response was not JSON", { cause }) as JevClientError;
         error.kind = "malformed";
         throw error;
