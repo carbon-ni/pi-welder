@@ -333,9 +333,9 @@ test("handleContext returns undefined when nothing to inject", async () => {
 });
 
 test("handleToolCall shadows ambiguous edits without blocking or mutating input", async () => {
-  // Whole neighborhood is duplicated, so deterministic expansion cannot resolve:
-  // preflight abstains and the shadow request is eligible.
-  const content = "a\nreturn value;\nb\nc\na\nreturn value;\nb\nc";
+  // Distinct neighborhoods around each occurrence give preflight two
+  // non-overlapping unique expansions, so it abstains and shadow is eligible.
+  const content = "return value; // first\nmid\n// last return value;";
   const root = await mkdtemp(path.join(tmpdir(), "welder-shadow-"));
   await writeFile(path.join(root, "a.ts"), content);
   const calls: unknown[] = [];
@@ -344,7 +344,6 @@ test("handleToolCall shadows ambiguous edits without blocking or mutating input"
     sourceShadowingEnabled: true,
     jevClient: { choose: async (request) => { calls.push(request); return { choice: 2, confidence: 0.99, model: "jev-test" }; } },
   });
-  runtime.disabledRepairs = new Set(["resolve-ambiguous-edit"]);
   await handleSessionStart(runtime, ctx({ cwd: root }));
   runtime.onShadowEvidence = (record) => evidence.push(record);
 
@@ -421,15 +420,31 @@ test("handleToolResult correlation labels a later successful edit", async () => 
   }
 });
 
+test("handleToolCall makes no shadow request when resolve-ambiguous-edit is disabled", async () => {
+  const content = "return value; // first\nmid\n// last return value;";
+  const root = await mkdtemp(path.join(tmpdir(), "welder-shadow-disabled-"));
+  await writeFile(path.join(root, "a.ts"), content);
+  const calls: unknown[] = [];
+  const runtime = createRuntime({
+    sourceShadowingEnabled: true,
+    jevClient: { choose: async (request) => { calls.push(request); return { choice: null, confidence: 1 }; } },
+  });
+  runtime.disabledRepairs = new Set(["resolve-ambiguous-edit"]);
+  await handleSessionStart(runtime, ctx({ cwd: root }));
+
+  await handleToolCall(runtime, { toolName: "edit", toolCallId: "c1", input: { path: "a.ts", edits: [{ oldText: "return value;", newText: "x" }] } } as any, ctx({ cwd: root }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(calls.length, 0);
+});
+
 test("persisted shadow JSONL events contain no source, paths, or edit text", async () => {
-  const content = "a\nreturn value;\nb\nc\na\nreturn value;\nb\nc";
+  const content = "return value; // first\nmid\n// last return value;";
   const root = await mkdtemp(path.join(tmpdir(), "welder-shadow-jsonl-"));
   await writeFile(path.join(root, "a.ts"), content);
   const runtime = createRuntime({
     sourceShadowingEnabled: true,
     jevClient: { choose: async () => ({ choice: 2, confidence: 0.99, model: "jev-test" }) },
   });
-  runtime.disabledRepairs = new Set(["resolve-ambiguous-edit"]);
   await handleSessionStart(runtime, ctx({ cwd: root }));
 
   await handleToolCall(runtime, { toolName: "edit", toolCallId: "c1", input: { path: "a.ts", edits: [{ oldText: "return value;", newText: "return nextValue; secret" }] } } as any, ctx({ cwd: root }));

@@ -25,7 +25,8 @@ import { createTypeSafeJevClient } from "./infra/typesafe.ts";
 
 export default function (pi: ExtensionHost) {
   const config = loadWelderConfig();
-  const apiKey = process.env.TYPESAFE_API_KEY;
+  // Whitespace-only or absent keys mean no client exists at all.
+  const apiKey = process.env.TYPESAFE_API_KEY?.trim() || undefined;
   const runtime = createRuntime({
     ...config,
     // Client exists whenever an API key is present, so the setting can be

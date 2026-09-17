@@ -121,6 +121,10 @@ function observeAndMaybeSubmitShadow(
   const path = typeof input.path === "string" ? input.path : undefined;
   const oldText = readSingleEditOldText(input);
   shadow.observeToolCall({ toolName: event.toolName, toolCallId: event.toolCallId, path, oldText });
+  // Strict eligibility: deterministic preflight must have been attempted and
+  // abstained. With the repair disabled there is no attempted preflight, so
+  // no Jev request is submitted.
+  if (runtime.disabledRepairs.has("resolve-ambiguous-edit")) return;
   if (!path || !oldText) return;
   void buildAmbiguousShadowRequest({ cwd: ctx.cwd, toolInput: input })
     .catch(() => undefined)

@@ -135,7 +135,8 @@ export function createJevShadow(options: JevShadowOptions): JevShadow {
       } else if (answer.choice === null) {
         finish({ ...base, status: "abstain" }, request);
       } else if (confidence === undefined || !Number.isFinite(confidence) || confidence < confidenceThreshold) {
-        finish({ ...base, selectedOrdinal: answer.choice, status: "low-confidence" }, request);
+        // Abstention-shaped: a low-confidence choice is not evidence of selection.
+        finish({ ...base, status: "low-confidence" }, request);
       } else {
         finish({ ...base, selectedOrdinal: answer.choice, status: "selected" }, request);
       }

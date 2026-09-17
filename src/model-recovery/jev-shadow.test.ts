@@ -171,3 +171,17 @@ test("an ambiguous retry mapping to multiple candidates stays unlabeled", async 
   assert.equal(evidence.length, 3);
   assert.ok(evidence.every((record) => record.labelStatus === "pending"));
 });
+
+test("low-confidence evidence is abstention-shaped without a selected ordinal", async () => {
+  const evidence: ShadowEvidence[] = [];
+  const shadow = createJevShadow({
+    client: { choose: async () => ({ choice: 2, confidence: 0.5 }) },
+    onEvidence: (record) => { evidence.push(record); },
+  });
+  assert.equal(shadow.submit(request()), true);
+  await shadow.drain();
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0]?.status, "low-confidence");
+  assert.equal(evidence[0]?.selectedOrdinal, undefined);
+  assert.ok(!("selectedOrdinal" in evidence[0]!));
+});
