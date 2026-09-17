@@ -41,6 +41,13 @@ export function welderSettingItems(config: WelderConfig): WelderSettingItem[] {
       values: [...ON_OFF],
     },
     {
+      id: "sourceShadowingEnabled",
+      label: "Jev source shadowing",
+      description: "Send bounded redacted repository source to TypeSafe (leaves this machine)",
+      currentValue: config.sourceShadowingEnabled ? "on" : "off",
+      values: [...ON_OFF],
+    },
+    {
       id: "recoveryGuidanceLimit",
       label: "Failure history limit",
       description: "Max recent tool failures retained for explicit diagnostics",
@@ -66,6 +73,9 @@ export function applyWelderSetting(config: WelderConfig, id: string, value: stri
   }
   if (id === "modelRepairReportingEnabled") {
     return { ...config, modelRepairReportingEnabled: value === "on" };
+  }
+  if (id === "sourceShadowingEnabled") {
+    return { ...config, sourceShadowingEnabled: value === "on" };
   }
   if (id === "recoveryGuidanceLimit") {
     const limit = Number(value);

@@ -9,6 +9,7 @@ test("parseWelderConfig defaults model repair reporting off, limit to 3, repairs
     recoveryGuidanceLimit: 3,
     repairsEnabled: true,
     disabledRepairs: [],
+    sourceShadowingEnabled: false,
   });
 });
 
@@ -50,6 +51,11 @@ test("parseWelderConfig enables per-model repair reporting explicitly", () => {
   assert.equal(parseWelderConfig({ modelRepairReportingEnabled: true }).modelRepairReportingEnabled, true);
 });
 
+test("parseWelderConfig requires an explicit boolean for source shadowing", () => {
+  assert.equal(parseWelderConfig({ sourceShadowingEnabled: true }).sourceShadowingEnabled, true);
+  assert.equal(parseWelderConfig({ sourceShadowingEnabled: "on" }).sourceShadowingEnabled, false);
+});
+
 test("parseWelderConfig rejects truthy non-boolean values", () => {
   assert.equal(parseWelderConfig({ modelRepairReportingEnabled: "true" }).modelRepairReportingEnabled, false);
 });
@@ -67,17 +73,17 @@ test("loadWelderConfig parses JSON from injected reader", () => {
 test("saveWelderConfig writes JSON via injected writer", () => {
   let captured: { path: string; data: string } | null = null;
   saveWelderConfig(
-    { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [] },
+    { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false },
     "/agent/welder.json",
     (path, data) => { captured = { path, data }; },
   );
   assert.equal(captured!.path, "/agent/welder.json");
-  assert.deepEqual(JSON.parse(captured!.data), { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [] });
+  assert.deepEqual(JSON.parse(captured!.data), { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false });
 });
 
 test("saveWelderConfig serializes a disabled config", () => {
   let data = "";
-  saveWelderConfig({ modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: false, disabledRepairs: [] }, "/x", (_p, d) => { data = d; });
+  saveWelderConfig({ modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: false, disabledRepairs: [], sourceShadowingEnabled: false }, "/x", (_p, d) => { data = d; });
   assert.equal(JSON.parse(data).modelRepairReportingEnabled, false);
   assert.equal(JSON.parse(data).repairsEnabled, false);
 });

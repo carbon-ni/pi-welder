@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { applyRepairedInput, handleContext, handleSessionStart, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
+import { applyRepairedInput, handleContext, handleSessionShutdown, handleSessionStart, handleToolCall, handleToolResult, repairStatusText } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
 
 function ctx(overrides: Partial<any> = {}): any {
@@ -330,4 +330,93 @@ test("handleContext returns undefined when nothing to inject", async () => {
   const out = await handleContext(runtime, { messages: [{ role: "user", content: "retry" }] } as any);
 
   assert.equal(out, undefined);
+});
+
+test("handleToolCall shadows ambiguous edits without blocking or mutating input", async () => {
+  // Whole neighborhood is duplicated, so deterministic expansion cannot resolve:
+  // preflight abstains and the shadow request is eligible.
+  const content = "a\nreturn value;\nb\nc\na\nreturn value;\nb\nc";
+  const root = await mkdtemp(path.join(tmpdir(), "welder-shadow-"));
+  await writeFile(path.join(root, "a.ts"), content);
+  const calls: unknown[] = [];
+  const evidence: any[] = [];
+  const runtime = createRuntime({
+    sourceShadowingEnabled: true,
+    jevClient: { choose: async (request) => { calls.push(request); return { choice: 2, confidence: 0.99, model: "jev-test" }; } },
+  });
+  runtime.disabledRepairs = new Set(["resolve-ambiguous-edit"]);
+  await handleSessionStart(runtime, ctx({ cwd: root }));
+  runtime.onShadowEvidence = (record) => evidence.push(record);
+
+  const input = { path: "a.ts", edits: [{ oldText: "return value;", newText: "return nextValue;" }] };
+  const started = Date.now();
+  await handleToolCall(runtime, { toolName: "edit", toolCallId: "c1", input } as any, ctx({ cwd: root }));
+  assert.ok(Date.now() - started < 100, "shadow must not block the tool call");
+  assert.deepEqual(input, { path: "a.ts", edits: [{ oldText: "return value;", newText: "return nextValue;" }] });
+  await new Promise((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 50 && calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  await runtime.jevShadow!.drain();
+
+  assert.equal(calls.length, 1);
+  assert.equal(runtime.jevShadow!.inFlight, 0);
+  assert.equal(evidence[0]?.status, "selected");
+  assert.equal(evidence[0]?.selectedOrdinal, 2);
+
+  await handleSessionShutdown(runtime, ctx({ cwd: root }));
+});
+
+test("handleToolCall makes no shadow request for unique edits", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-shadow-unique-"));
+  await writeFile(path.join(root, "a.ts"), "return value;\n");
+  const calls: unknown[] = [];
+  const runtime = createRuntime({
+    sourceShadowingEnabled: true,
+    jevClient: { choose: async (request) => { calls.push(request); return { choice: null, confidence: 1 }; } },
+  });
+  await handleSessionStart(runtime, ctx({ cwd: root }));
+
+  await handleToolCall(runtime, { toolName: "edit", toolCallId: "c1", input: { path: "a.ts", edits: [{ oldText: "return value;", newText: "x" }] } } as any, ctx({ cwd: root }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 0);
+
+  await handleToolCall(runtime, { toolName: "read", toolCallId: "c2", input: { path: "a.ts" } } as any, ctx({ cwd: root }));
+  assert.equal(calls.length, 0);
+});
+
+test("shadow is inactive without a client even when the setting is on", async () => {
+  const runtime = createRuntime({ sourceShadowingEnabled: true });
+  await handleSessionStart(runtime, ctx());
+  assert.equal(runtime.jevShadow, undefined);
+});
+
+test("handleToolResult correlation labels a later successful edit", async () => {
+  const evidence: any[] = [];
+  const runtime = createRuntime({
+    sourceShadowingEnabled: true,
+    jevClient: { choose: async () => ({ choice: 2, confidence: 0.99, model: "jev-test" }) },
+  });
+  await handleSessionStart(runtime, ctx());
+  runtime.onShadowEvidence = (record) => evidence.push(record);
+  const shadow = runtime.jevShadow!;
+  shadow.submit({
+    toolCallId: "c1",
+    path: "src/a.ts",
+    candidates: [
+      { ordinal: 1, window: "first candidate body" },
+      { ordinal: 2, window: "second candidate body" },
+    ],
+    requestedEditText: "x",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await handleToolCall(runtime, { toolName: "edit", toolCallId: "c2", input: { path: "src/a.ts", edits: [{ oldText: "second candidate body", newText: "y" }] } } as any, ctx());
+  await handleToolResult(runtime, { toolName: "edit", toolCallId: "c2", input: {}, isError: false } as any, ctx());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(evidence.length, 2);
+  assert.equal(evidence[1]?.labelStatus, "provisional-correct");
+  for (const record of evidence) {
+    const json = JSON.stringify(record);
+    assert.doesNotMatch(json, /candidate body|src\/a\.ts/);
+  }
 });

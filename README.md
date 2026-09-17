@@ -73,6 +73,18 @@ Per-model repair ranking is opt-in because it can increase report cardinality. C
 
 When disabled or absent (default), mining behavior and reports remain failure-only. Restart Pi after changing the file.
 
+### Jev source shadowing (opt-in, sends source off-machine)
+
+When an exact edit target is ambiguous (2–5 exact occurrences of `oldText`) and deterministic repair cannot resolve it, welder can ask TypeSafe's Jev which candidate was intended — purely as shadow evidence. The original edit proceeds unchanged; Jev can never mutate calls, files, or results.
+
+This is **off by default** and requires two things: the persisted setting below **and** a `TYPESAFE_API_KEY` environment variable. When enabled, **bounded, credential-redacted repository source leaves this machine**: at most 5 candidate windows of 20 lines / 2 KiB each (12 KiB total) plus the sanitized requested edit text, capped at 10 requests per session, one at a time, 2-second timeout, zero retries. Logs persist only candidate counts, chosen ordinal/abstention, confidence, latency, and status — never paths, source, edit text, or payloads.
+
+```json
+{
+  "sourceShadowingEnabled": true
+}
+```
+
 ## Architecture
 
 ```

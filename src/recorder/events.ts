@@ -1,8 +1,9 @@
 import type { Repair } from "../repairs/index.ts";
+import type { ShadowEvidence } from "../model-recovery/jev-shadow.ts";
 
 export interface WelderEvent {
   ts: string;
-  eventType: "tool_call" | "tool_result" | "episode";
+  eventType: "tool_call" | "tool_result" | "episode" | "shadow";
   toolName: string;
   provider: string;
   model: string;
@@ -18,6 +19,13 @@ export interface WelderEvent {
   outcome?: string;
   window?: number;
   unrelatedCalls?: number;
+  /** Shadow-only metadata. Never contains paths, source, edit text, or payloads. */
+  candidateCount?: number;
+  selectedOrdinal?: number;
+  confidence?: number;
+  latencyMs?: number;
+  decisionModel?: string;
+  labelStatus?: string;
 }
 
 interface BuildEventInput {
@@ -68,6 +76,31 @@ export function buildToolResultEvent(input: BuildToolResultEventInput): WelderEv
 }
 
 import type { EpisodeRecord } from "../episodes.ts";
+
+export function buildShadowEvent(
+  evidence: ShadowEvidence,
+  meta: { provider: string; model: string },
+  nowMs = Date.now(),
+): WelderEvent {
+  const decisionModel = evidence.model?.match(/^[A-Za-z0-9._:/-]{1,80}$/)?.[0];
+  return {
+    ts: new Date(nowMs).toISOString(),
+    eventType: "shadow",
+    toolName: "edit",
+    provider: meta.provider,
+    model: meta.model,
+    repairs: [],
+    wasRepaired: false,
+    inputKeys: [],
+    candidateCount: evidence.candidateCount,
+    ...(evidence.selectedOrdinal === undefined ? {} : { selectedOrdinal: evidence.selectedOrdinal }),
+    ...(evidence.confidence === undefined ? {} : { confidence: evidence.confidence }),
+    latencyMs: evidence.latencyMs,
+    ...(decisionModel === undefined ? {} : { decisionModel }),
+    outcome: evidence.status,
+    labelStatus: evidence.labelStatus,
+  };
+}
 
 export function buildEpisodeEvent(record: EpisodeRecord, nowMs: number): WelderEvent {
   return {

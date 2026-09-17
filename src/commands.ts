@@ -21,7 +21,7 @@ import {
   writeFailureReport,
   type FailureEvent,
 } from "./recorder/index.ts";
-import { resetSessionState, type WelderRuntime } from "./runtime.ts";
+import { resetSessionState, setSourceShadowingEnabled, type WelderRuntime } from "./runtime.ts";
 import { welderStatusText } from "./handlers.ts";
 
 export interface WelderCommandSpec {
@@ -160,6 +160,7 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
           runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
           runtime.enabled = current.repairsEnabled;
           runtime.disabledRepairs = new Set(current.disabledRepairs);
+          setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
           ctx.ui.setStatus("welder", welderStatusText(runtime));
           try {
             setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);

@@ -7,6 +7,7 @@ export interface WelderConfig {
   recoveryGuidanceLimit: number;
   repairsEnabled: boolean;
   disabledRepairs: string[];
+  sourceShadowingEnabled: boolean;
 }
 
 export const WELDER_CONFIG_PATH = join(homedir(), ".pi", "agent", "welder.json");
@@ -32,6 +33,7 @@ export function parseWelderConfig(value: unknown): WelderConfig {
     recoveryGuidanceLimit: parseRecoveryGuidanceLimit(input.recoveryGuidanceLimit),
     repairsEnabled: input.repairsEnabled !== false,
     disabledRepairs: parseDisabledRepairs(input.disabledRepairs),
+    sourceShadowingEnabled: input.sourceShadowingEnabled === true,
   };
 }
 

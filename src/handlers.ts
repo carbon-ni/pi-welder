@@ -2,6 +2,7 @@ import type { ContextEvent, ToolCallEvent, ToolResultEvent, WelderContext } from
 import { repairArgs, type Repair, type RepairValidation } from "./repairs/index.ts";
 import { repairToolResult as repairResult, resultRepairRules, type ResultRepairPatch } from "./result-repairs/index.ts";
 import { preflightEditMismatch } from "./model-recovery/edit-mismatch.ts";
+import { buildAmbiguousShadowRequest } from "./model-recovery/ambiguous-shadow.ts";
 import {
   extractToolErrorText,
   recordToolResult,
@@ -14,6 +15,7 @@ import {
   appendEvent,
   buildEpisodeEvent,
   buildEvent,
+  buildShadowEvent,
   buildToolResultEvent,
   pruneOldSessions,
   recordRepairs,
@@ -43,11 +45,16 @@ export async function handleSessionStart(
 ): Promise<void> {
   resetSessionState(runtime);
   runtime.stats.sessionId = sessionId(ctx);
+  // Persist only safe shadow metadata (counts, ordinals, latency); payloads stay in memory.
+  runtime.onShadowEvidence = (evidence) => {
+    void appendEvent(logDir(ctx), sessionId(ctx), buildShadowEvent(evidence, modelMeta(ctx))).catch(() => { /* logging never breaks tool flow */ });
+  };
   await pruneOldSessions(logDir(ctx), retention).catch(() => {});
   if (ctx.hasUI) ctx.ui.setStatus("welder", welderStatusText(runtime));
 }
 
 export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
+  await runtime.jevShadow?.shutdown().catch(() => { /* never block shutdown */ });
   await appendEpisodeRecords(runtime.episodes.closeAll(), ctx).catch(() => { /* never block shutdown */ });
   if (ctx.hasUI) ctx.ui.setStatus("welder", undefined);
 }
@@ -92,8 +99,42 @@ export async function handleToolCall(
     }
   }
 
+  observeAndMaybeSubmitShadow(runtime, event, ctx, input as Record<string, unknown>);
+
   runtime.episodes.observeCall({ toolName: event.toolName, actions: callActions });
   return undefined;
+}
+
+/**
+ * Shadow-only evidence collection. Eligibility is strictly 2–5 exact candidate
+ * occurrences of a single edit; the original call proceeds unchanged and the
+ * deferred Jev request can never mutate input, results, or files.
+ */
+function observeAndMaybeSubmitShadow(
+  runtime: WelderRuntime,
+  event: ToolCallEvent,
+  ctx: WelderContext,
+  input: Record<string, unknown>,
+): void {
+  const shadow = runtime.jevShadow;
+  if (!shadow || event.toolName !== "edit" || typeof event.toolCallId !== "string") return;
+  const path = typeof input.path === "string" ? input.path : undefined;
+  const oldText = readSingleEditOldText(input);
+  shadow.observeToolCall({ toolName: event.toolName, toolCallId: event.toolCallId, path, oldText });
+  if (!path || !oldText) return;
+  void buildAmbiguousShadowRequest({ cwd: ctx.cwd, toolInput: input })
+    .catch(() => undefined)
+    .then((request) => {
+      if (!request || runtime.jevShadow !== shadow) return;
+      shadow.submit({ toolCallId: event.toolCallId!, path, candidates: request.candidates, requestedEditText: request.requestedEditText });
+    });
+}
+
+function readSingleEditOldText(input: Record<string, unknown>): string | undefined {
+  const edits = input.edits;
+  if (!Array.isArray(edits) || edits.length !== 1) return undefined;
+  const oldText = (edits[0] as Record<string, unknown> | undefined)?.oldText;
+  return typeof oldText === "string" ? oldText : undefined;
 }
 
 export function repairToolInput(
@@ -147,6 +188,7 @@ export async function handleToolResult(
 ): Promise<ResultRepairPatch | undefined> {
   // Correlate this result with episodes opened before the call was made.
   const closedRecords = runtime.episodes.observeResult({ toolName: event.toolName, isError: event.isError === true });
+  runtime.jevShadow?.observeToolResult({ toolName: event.toolName, toolCallId: event.toolCallId, isError: event.isError === true });
   await appendEpisodeRecords(closedRecords, ctx).catch(() => { /* logging never breaks results */ });
 
   const deterministicRepair = runtime.enabled
