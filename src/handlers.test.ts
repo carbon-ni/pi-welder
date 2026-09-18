@@ -462,7 +462,7 @@ test("persisted shadow JSONL events contain no source, paths, or edit text", asy
     assert.doesNotMatch(serialized, /return value|nextValue|a\.ts|secret/);
     assert.deepEqual(
       Object.keys(event).filter((key) => !["ts", "eventType", "toolName", "provider", "model", "repairs", "wasRepaired", "inputKeys"].includes(key)).sort(),
-      ["candidateCount", "confidence", "decisionModel", "labelStatus", "latencyMs", "outcome", "selectedOrdinal"].sort(),
+      ["candidateCount", "confidence", "decisionModel", "labelStatus", "latencyMs", "outcome", "selectedOrdinal", "toolCallId"].sort(),
     );
   }
 });

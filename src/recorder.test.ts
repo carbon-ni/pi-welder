@@ -265,3 +265,27 @@ test("statsSummary renders failed tool results", () => {
   assert.match(out, /read.*2/);
   assert.match(out, /edit.*1/);
 });
+
+test("buildShadowEvent persists the opaque toolCallId and only safe metadata", async () => {
+  const { buildShadowEvent } = await import("./recorder/index.ts");
+  const event = buildShadowEvent({
+    toolCallId: "tool:123:abc",
+    candidateCount: 3,
+    selectedOrdinal: 2,
+    confidence: 0.97,
+    model: "jev-latest",
+    latencyMs: 140,
+    status: "selected",
+    labelStatus: "pending",
+  }, { provider: "p", model: "m" }, 0);
+
+  assert.equal(event.eventType, "shadow");
+  assert.equal(event.toolCallId, "tool:123:abc");
+  assert.equal(event.candidateCount, 3);
+  assert.equal(event.selectedOrdinal, 2);
+  assert.equal(event.confidence, 0.97);
+  assert.equal(event.decisionModel, "jev-latest");
+  assert.equal(event.outcome, "selected");
+  const serialized = JSON.stringify(event);
+  assert.doesNotMatch(serialized, /oldText|newText|window|path/);
+});

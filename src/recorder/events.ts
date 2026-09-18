@@ -20,6 +20,7 @@ export interface WelderEvent {
   window?: number;
   unrelatedCalls?: number;
   /** Shadow-only metadata. Never contains paths, source, edit text, or payloads. */
+  toolCallId?: string;
   candidateCount?: number;
   selectedOrdinal?: number;
   confidence?: number;
@@ -92,6 +93,7 @@ export function buildShadowEvent(
     repairs: [],
     wasRepaired: false,
     inputKeys: [],
+    toolCallId: evidence.toolCallId,
     candidateCount: evidence.candidateCount,
     ...(evidence.selectedOrdinal === undefined ? {} : { selectedOrdinal: evidence.selectedOrdinal }),
     ...(evidence.confidence === undefined ? {} : { confidence: evidence.confidence }),
