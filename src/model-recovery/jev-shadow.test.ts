@@ -185,3 +185,23 @@ test("low-confidence evidence is abstention-shaped without a selected ordinal", 
   assert.equal(evidence[0]?.selectedOrdinal, undefined);
   assert.ok(!("selectedOrdinal" in evidence[0]!));
 });
+
+test("duplicate windows across selections keep global candidate uniqueness (regression)", async () => {
+  // c1 = [x, x], c2 = [x, y]; retry oldText "x" matches 3 candidates globally
+  // (2 in c1, 1 in c2) -> must stay unlabeled, never link to c2 alone.
+  const evidence: ShadowEvidence[] = [];
+  const shadow = createJevShadow({
+    client: { choose: async () => ({ choice: 1, confidence: 1 }) },
+    onEvidence: (record) => { evidence.push(record); },
+  });
+  assert.equal(shadow.submit({ ...request("c1"), candidates: [{ ordinal: 1, window: "x" }, { ordinal: 2, window: "x" }] }), true);
+  await shadow.drain();
+  assert.equal(shadow.submit({ ...request("c2"), candidates: [{ ordinal: 1, window: "x" }, { ordinal: 2, window: "y" }] }), true);
+  await shadow.drain();
+
+  shadow.observeToolCall({ toolName: "edit", toolCallId: "retry", path: "src/example.ts", oldText: "x" });
+  shadow.observeToolResult({ toolName: "edit", toolCallId: "retry", isError: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(evidence.length, 2);
+  assert.ok(evidence.every((record) => record.labelStatus === "pending"));
+});

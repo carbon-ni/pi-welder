@@ -39,9 +39,9 @@ test("worksheet round-trips rows deterministically with a blank verified-target 
   ];
   const text = buildWorksheet(rows);
   const lines = text.split("\n").filter((line) => line.length > 0);
-  assert.equal(lines[0], "toolCallId\tsessionId\tts\tcandidateCount\tselectedOrdinal\tconfidence\tlabelStatus\toutcome\tlatencyMs\tverified-target");
+  assert.equal(lines[0], "toolCallId\tsessionId\tts\tcandidateCount\tselectedOrdinal\tconfidence\tlabelStatus\toutcome\tlatencyMs\tlinked\tverified-target");
   assert.match(lines[3]!, /^a\ts-2\t/);
-  assert.ok(lines.every((line) => line.split("\t").length === 10));
+  assert.ok(lines.every((line) => line.split("\t").length === 11));
   assert.ok(lines[1]!.endsWith("\t"), "verified-target starts blank");
 
   const parsed = parseWorksheet(text);
@@ -93,4 +93,11 @@ test("linkTranscript reuses exact globally-unique matching", () => {
 
 test("parseWorksheet rejects a headerless worksheet instead of misparsing", () => {
   assert.throws(() => parseWorksheet("tool:1\ts-1\tt\t2\t1\t0.9\tpending\tselected\t1\t1\n"), /header row/);
+});
+
+test("worksheet round-trips the linked boolean", () => {
+  const text = buildWorksheet([row({ linked: true }), row({})]);
+  const parsed = parseWorksheet(text);
+  assert.equal(parsed[0]?.linked, true);
+  assert.equal(parsed[1]?.linked, false);
 });

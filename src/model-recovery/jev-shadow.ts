@@ -1,5 +1,5 @@
 import type { JevClient, JevClientError } from "../infra/typesafe.ts";
-import { uniqueCandidateByWindow } from "./shadow-correlation.ts";
+import { uniqueCandidateAcrossSelections } from "./shadow-correlation.ts";
 
 export const DEFAULT_SHADOW_CONFIDENCE = 0.99;
 export const DEFAULT_SHADOW_TIMEOUT_MS = 2_000;
@@ -181,15 +181,15 @@ export function createJevShadow(options: JevShadowOptions): JevShadow {
           selections.splice(selections.indexOf(selection), 1);
         }
       }
-      // Exact, globally unique match only (see shadow-correlation.ts): the
-      // retry's oldText must equal exactly one open candidate window across
-      // all selections. Anything ambiguous or substring-based stays unlabeled.
-      const matches = selections
+      // Candidate-level global uniqueness (see shadow-correlation.ts): the
+      // retry's oldText must equal exactly one candidate window across ALL
+      // open selections. Ambiguous or substring matches stay unlabeled.
+      const open = selections
         .filter((selection) => selection.request.path === observation.path)
-        .map((selection) => ({ selection, candidate: uniqueCandidateByWindow(selection.request.candidates, observation.oldText) }))
-        .filter((entry) => entry.candidate !== undefined);
-      if (matches.length !== 1) return;
-      pendingLabels.set(observation.toolCallId, { selection: matches[0]!.selection, actualOrdinal: matches[0]!.candidate!.ordinal });
+        .map((selection) => ({ source: selection, candidates: selection.request.candidates }));
+      const match = uniqueCandidateAcrossSelections(open, observation.oldText);
+      if (!match) return;
+      pendingLabels.set(observation.toolCallId, { selection: match.selection.source, actualOrdinal: match.candidate.ordinal });
     },
 
     observeToolResult(observation): void {

@@ -143,7 +143,10 @@ async function commandWorksheet(args: Args): Promise<void> {
     }
   }
   const transcripts = await collectTranscripts(args.sessions);
-  const linked = rows.filter((row) => linkTranscript(transcripts, row).callLinked);
+  for (const row of rows) {
+    row.linked = linkTranscript(transcripts, row).callLinked;
+  }
+  const linked = rows.filter((row) => row.linked);
   const worksheet = buildWorksheet(rows);
   await mkdir(path.parse(args.out).dir, { recursive: true });
   await writeFile(args.out, worksheet);

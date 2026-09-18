@@ -17,6 +17,7 @@ export const WORKSHEET_COLUMNS = [
   "labelStatus",
   "outcome",
   "latencyMs",
+  "linked",
   "verified-target",
 ] as const;
 
@@ -30,6 +31,8 @@ export interface ShadowRow {
   labelStatus: string;
   outcome: string;
   latencyMs: number;
+  /** Reviewer aid: true only when the row linked to exactly one transcript edit call. */
+  linked?: boolean;
   verifiedTarget?: string;
 }
 
@@ -62,6 +65,7 @@ export function sortRows(rows: readonly ShadowRow[]): ShadowRow[] {
 
 function renderCell(row: ShadowRow, column: (typeof WORKSHEET_COLUMNS)[number]): string {
   if (column === "verified-target") return row.verifiedTarget ?? "";
+  if (column === "linked") return String(row.linked ?? false);
   const value = row[column as keyof ShadowRow];
   return value === undefined ? "" : String(value);
 }
@@ -93,6 +97,7 @@ export function parseWorksheet(text: string): ShadowRow[] {
       labelStatus: record.labelStatus ?? "",
       outcome: record.outcome ?? "",
       latencyMs: Number(record.latencyMs ?? 0),
+      linked: record.linked === "true",
       ...(record["verified-target"] ? { verifiedTarget: record["verified-target"] } : {}),
     } as ShadowRow;
   });

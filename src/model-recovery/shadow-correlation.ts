@@ -25,3 +25,25 @@ export function uniqueMatch<T>(items: readonly T[], isMatch: (item: T) => boolea
   const matched = items.filter(isMatch);
   return matched.length === 1 ? matched[0] : undefined;
 }
+
+export interface CandidateSelection {
+  candidates: readonly CorrelationCandidate[];
+}
+
+/**
+ * Candidate-level global uniqueness: all candidates across all open
+ * selections are flattened, and a correlation exists only when exactly one
+ * candidate anywhere matches. Per-selection collapsing before the global
+ * check would hide equal matches in other selections.
+ */
+export function uniqueCandidateAcrossSelections<S extends CandidateSelection>(
+  selections: readonly S[],
+  oldText: string | undefined,
+): { selection: S; candidate: CorrelationCandidate } | undefined {
+  if (!oldText) return undefined;
+  const matches = selections.flatMap((selection) =>
+    selection.candidates
+      .filter((candidate) => candidate.window === oldText)
+      .map((candidate) => ({ selection, candidate })));
+  return matches.length === 1 ? matches[0] : undefined;
+}
