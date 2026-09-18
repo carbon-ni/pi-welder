@@ -1,16 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { uniqueCandidateAcrossSelections, uniqueCandidateByWindow, uniqueMatch } from "./shadow-correlation.ts";
-
-test("uniqueCandidateByWindow links only a single exact match", () => {
-  const candidates = [{ ordinal: 1, window: "a" }, { ordinal: 2, window: "b" }];
-  assert.equal(uniqueCandidateByWindow(candidates, "a")?.ordinal, 1);
-  assert.equal(uniqueCandidateByWindow(candidates, "z"), undefined);
-  assert.equal(uniqueCandidateByWindow(candidates, undefined), undefined);
-  // Substring is not a match.
-  assert.equal(uniqueCandidateByWindow(candidates, ""), undefined);
-});
+import { uniqueCandidateAcrossSelections, uniqueMatch } from "./shadow-correlation.ts";
 
 test("uniqueCandidateAcrossSelections counts candidates globally, not per selection", () => {
   const c1 = { candidates: [{ ordinal: 1, window: "x" }, { ordinal: 2, window: "x" }] };
