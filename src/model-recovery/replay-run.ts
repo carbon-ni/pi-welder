@@ -11,7 +11,7 @@
 
 import type { JevClient, JevClientError } from "../infra/typesafe.ts";
 import type { ShadowStatus } from "./jev-shadow.ts";
-import { parseWorksheet, sortRows, renderRowCells, WORKSHEET_COLUMNS, type ShadowRow } from "./shadow-labels.ts";
+import { CONFIDENCE_THRESHOLD, parseWorksheet, sortRows, renderRowCells, WORKSHEET_COLUMNS, type ShadowRow } from "./shadow-labels.ts";
 import type { AmbiguousShadowRequest } from "./ambiguous-shadow.ts";
 
 export const REPLAY_BUDGET = 200;
@@ -123,8 +123,8 @@ async function replayOne(
   }
 }
 
-/** Predeclared TASK-0020 operating point: only >= 0.9 confidence is a selection. */
-export const CONFIDENCE_GATE = 0.9;
+/** Predeclared TASK-0020 operating point, imported verbatim from shadow-labels. */
+export const CONFIDENCE_GATE = CONFIDENCE_THRESHOLD;
 
 function settle(
   pair: PreparedPair,

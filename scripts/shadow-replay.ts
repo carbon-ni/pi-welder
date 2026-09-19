@@ -64,6 +64,8 @@ function parseArgs(argv: readonly string[]): Args {
     }
   }
   if (!Number.isInteger(args.budget) || args.budget < 0) throw new Error("--budget must be a non-negative integer");
+  // Protocol cap (fixed PO scope): the flag may lower the budget, never exceed it.
+  args.budget = Math.min(args.budget, REPLAY_BUDGET);
   return args;
 }
 
