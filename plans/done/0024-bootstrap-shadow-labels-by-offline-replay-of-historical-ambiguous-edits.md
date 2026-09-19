@@ -1,7 +1,7 @@
 ---
 id: TASK-0024
 title: Bootstrap shadow labels by offline replay of historical ambiguous edits
-status: doing
+status: done
 depends_on: [TASK-0019]
 priority: high
 tags: [edit, typesafe, shadow, evidence, replay, promotion]
