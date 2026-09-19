@@ -1,7 +1,7 @@
 ---
 id: TASK-0026
 title: Tune Jev ordinal selection for fixture coverage
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [typesafe, eval, fixtures, edit, safety]
