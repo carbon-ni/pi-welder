@@ -1,0 +1,64 @@
+## Funzzy events file — .watch.yaml
+# Comprehensive commented starter: small active setup, every supported
+# option documented in comments. Full reference: `fzz config schema`.
+#
+# Next commands:
+#   fzz check                  validate this file (no watcher)
+#   fzz list                   show configured jobs
+#   fzz run <name>             run one job once
+#   fzz / fzz watch            start watching
+#   fzz control status         talk to the running watcher
+#   fzz config example minimal tiny machine-copyable starter
+
+on:
+  # change: Common change globs applied to every job (inherited, merged first)
+  # change: "**/*"
+  # ignore: Common ignore globs; explicit config ignore wins over gitignore
+  # ignore: "**/*.log"
+  # socket: Control socket path; enables the control surface (`fzz control`)
+  socket: .watch.sock
+  # debounce: Filesystem batch debounce window (default: 1s)
+  # debounce: 500ms
+  # watch_backend: Watch backend: native first, then poll when native is unavailable (default: auto) values: native | poll | auto
+  # watch_backend: poll
+  # poll_interval: Poll backend interval (only meaningful with `watch_backend: poll`) (default: 500ms)
+  # poll_interval: 200ms
+  # respect_gitignore: Respect workspace .gitignore rules (default: false)
+  # respect_gitignore: true
+
+execution:
+  # concurrency: Global cap on simultaneously active tasks (default: machine parallelism)
+  concurrency: 2
+  # output: Default output policy for every job (default: inherit) values: inherit | quiet | capture | show-on-failure
+  # output: quiet
+  # timeout: Default finite-job execution timeout; job timeout overrides it. Services remain unbounded
+  # timeout: 10m
+  # recovery_policy: Recovery approval policy for failed jobs with a recovery command; missing TTY safely skips (default: prompt) values: prompt | skip
+  # recovery_policy: prompt
+  # recovery_timeout: Maximum time to wait for interactive recovery approval (default: 60s)
+  # recovery_timeout: 60s
+
+hooks:
+  # success: Hook command run after a successful generation
+  success: echo "Funzzy generation succeeded"
+  # failure: Hook command run after a failed generation; optionally settle the failure first
+  # failure:
+  #   run: echo failed > .fzz-failed
+  #   settle: 30s
+  # close: Finite hook command run once when a ready watcher closes
+  # close: echo closed > .fzz-closed
+
+jobs:
+  # The local watcher and CI share this quality gate. Keep this command as the
+  # single source of truth for type checking and deterministic tests.
+  - name: ci guardrails
+    run_on_init: true
+    change:
+      - 'src/**/*.ts'
+      - 'scripts/**/*.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.watch.yaml'
+    run: npm run check
+    output: show-on-failure
