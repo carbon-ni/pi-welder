@@ -1,7 +1,7 @@
 ---
 id: TASK-0023
 title: Catalog bounded Jev opportunities from failure mining
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [typesafe, mining, evidence, roadmap, safety]
