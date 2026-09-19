@@ -14,7 +14,8 @@
  * never promotion evidence — and the real-API probe stays behind --execute.
  */
 
-import { generateCandidates, type AmbiguousEditCase } from "./edit-selection.ts";
+import { generateCandidates, ALWAYS_ABSTAIN, similarityRankSelector, type AmbiguousEditCase, type EditSelector } from "./edit-selection.ts";
+import { createTypeSafeJevClient, type JevClient, type JevSelectionRequest, type JevSelectionResponse } from "../infra/typesafe.ts";
 
 export type ProbeTier = "tier-1-strong-context" | "tier-2-weak-context" | "tier-3-genuinely-ambiguous";
 
@@ -210,6 +211,109 @@ export function probeCasesByTier(fixtures: readonly ProbeFixture[] = JEV_PROBE_F
     tier,
     cases: fixtures.filter((fixture) => fixture.tier === tier).map(probeCase),
   }));
+}
+
+// --- Jev probe adapter (TASK-0025 correction: the hypothesis is Jev-specific) ---
+
+export interface JevProbeRequest {
+  case: AmbiguousEditCase;
+  request: JevSelectionRequest;
+}
+
+/** Full source lines containing the candidate occurrence; ordinals unchanged. */
+function windowAround(content: string, start: number, end: number): string {
+  const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const lineEnd = content.indexOf("\n", Math.max(start, end - 1));
+  return content.slice(lineStart, lineEnd === -1 ? content.length : lineEnd);
+}
+
+/**
+ * Maps a probe fixture onto the JevClient request shape: candidate windows
+ * are derived verbatim from the fixture content (same ordinals), and the
+ * requested edit text is the fixture's newText. No semantics change.
+ */
+export function jevProbeRequest(fixture: ProbeFixture): JevProbeRequest {
+  const probe = probeCase(fixture);
+  return {
+    case: probe,
+    request: {
+      candidates: probe.candidates.map((candidate) => ({
+        ordinal: candidate.ordinal,
+        window: windowAround(fixture.content, candidate.offset, candidate.offset + candidate.length),
+      })),
+      requestedEditText: fixture.newText,
+    },
+  };
+}
+
+export interface JevProbeSelector extends EditSelector {
+  id: string;
+  /** Successful raw Jev responses (caseId + confidence), for tier curves. */
+  responses: { caseId: string; response: JevSelectionResponse }[];
+}
+
+/**
+ * EditSelector adapter over the existing JevClient. One bounded call per
+ * case (2s timeout), zero retries; every failure or out-of-range ordinal
+ * abstains — evidence only, never a mutation.
+ */
+export function createJevProbeSelector(
+  client: JevClient,
+  requests: readonly JevProbeRequest[],
+  timeoutMs = 2_000,
+): JevProbeSelector {
+  const byCase = new Map(requests.map((entry) => [entry.case.caseId, entry]));
+  const responses: { caseId: string; response: JevSelectionResponse }[] = [];
+  return {
+    id: "jev-ordinal",
+    responses,
+    async select(selectionCase) {
+      const entry = byCase.get(selectionCase.caseId);
+      if (!entry) return { abstain: true }; // fail closed on unknown cases
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const answer = await client.choose(entry.request, controller.signal);
+        responses.push({ caseId: selectionCase.caseId, response: answer });
+        if (answer.choice === null) return { abstain: true };
+        if (!entry.request.candidates.some((candidate) => candidate.ordinal === answer.choice)) {
+          return { abstain: true }; // out-of-range ordinals are not selections
+        }
+        return { ordinal: answer.choice };
+      } catch {
+        return { abstain: true }; // errors are evidence-neutral abstentions
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+export interface ProbeSelectorSet {
+  selectors: readonly { id: string; selector: EditSelector }[];
+  /** Present only when execute is true. */
+  jevSelector?: JevProbeSelector;
+}
+
+/**
+ * Offline runs get the deterministic selectors only — no client is ever
+ * created and no key is read. The --execute run adds the TypeSafe Jev
+ * adapter and fails closed on a missing or blank TYPESAFE_API_KEY.
+ */
+export function buildProbeSelectors(
+  options: { execute: boolean; apiKey?: string; createJevClient?: (apiKey: string) => JevClient },
+): ProbeSelectorSet {
+  const selectors: { id: string; selector: EditSelector }[] = [
+    { id: "offline-abstain", selector: ALWAYS_ABSTAIN },
+    { id: "offline-similarity", selector: similarityRankSelector() },
+  ];
+  if (!options.execute) return { selectors };
+
+  const apiKey = options.apiKey?.trim();
+  if (!apiKey) throw new Error("--execute requires TYPESAFE_API_KEY");
+  const createJevClient = options.createJevClient ?? ((key: string) => createTypeSafeJevClient({ apiKey: key }));
+  const jevSelector = createJevProbeSelector(createJevClient(apiKey), JEV_PROBE_FIXTURES.map(jevProbeRequest));
+  return { selectors: [...selectors, { id: jevSelector.id, selector: jevSelector }], jevSelector };
 }
 
 /** Frozen fixture counts per tier (deterministic; used by the phase-1 report). */

@@ -12,7 +12,7 @@
  *   discovered from the session corpus, plus repair-yield over the frozen
  *   instinct fixture suite (dead rules flagged).
  * - Phase 2: probe fixture counts always; the real-API Jev probe runs only
- *   with --execute plus OPENROUTER_API_KEY (opt-in approval convention).
+ *   with --execute plus TYPESAFE_API_KEY (opt-in approval convention).
  * - Everything is direction evidence only. Artifacts land under .tmp/ (git-ignored).
  */
 import * as fs from "node:fs/promises";
@@ -22,10 +22,16 @@ import * as path from "node:path";
 import { loadEpisodes, type BenchEpisode } from "../src/bench/dataset.ts";
 import { runReplay } from "../src/bench/runner.ts";
 import { NO_MESSAGE, SHIPPED } from "../src/bench/baselines.ts";
-import { createOpenRouterClient } from "../src/bench/smoke.ts";
-import { createModelSelector, ALWAYS_ABSTAIN, evaluateSelector, similarityRankSelector, type SelectionEvalResult } from "../src/bench/edit-selection.ts";
+import { ALWAYS_ABSTAIN, evaluateSelector, similarityRankSelector, type SelectionEvalResult } from "../src/bench/edit-selection.ts";
 import { INSTINCT_FIXTURES, buildYieldReport, runFixtureSuite } from "../src/bench/instincts.ts";
-import { JEV_PROBE_FIXTURES, PROBE_TIERS, probeCasesByTier, probeFixtureCounts } from "../src/bench/probe-fixtures.ts";
+import {
+  JEV_PROBE_FIXTURES,
+  PROBE_TIERS,
+  buildProbeSelectors,
+  probeCase,
+  probeFixtureCounts,
+  type JevProbeSelector,
+} from "../src/bench/probe-fixtures.ts";
 import { renderDirectionJson, renderDirectionMarkdown, type BaselineScore, type DirectionReport, type ProbeTierResult } from "../src/bench/direction-report.ts";
 import { readEvents } from "../src/recorder/log.ts";
 
@@ -122,26 +128,20 @@ function baselineScores(episodes: readonly BenchEpisode[]): BaselineScore[] {
   return scores;
 }
 
-// --- phase 2: probe -------------------------------------------------------------
+// --- phase 2: probe (Jev via the existing TypeSafe client; --execute gated) -----
 
-async function probeTierResults(execute: boolean): Promise<{ executed: boolean; tierResults: ProbeTierResult[] }> {
-  const grouped = probeCasesByTier();
+async function probeTierResults(execute: boolean): Promise<{ executed: boolean; tierResults: ProbeTierResult[]; jevSelector?: JevProbeSelector }> {
+  // Fails closed on a missing/blank TYPESAFE_API_KEY when execute is true.
+  const { selectors, jevSelector } = buildProbeSelectors({ execute, apiKey: process.env.TYPESAFE_API_KEY });
+  const grouped = PROBE_TIERS.map((tier) => ({
+    tier,
+    cases: JEV_PROBE_FIXTURES.filter((fixture) => fixture.tier === tier),
+  }));
   const tierResults: ProbeTierResult[] = [];
-
-  const selectors = execute
-    ? [
-        { id: "offline-abstain", selector: ALWAYS_ABSTAIN },
-        { id: "offline-similarity", selector: similarityRankSelector() },
-        { id: "model-ordinal", selector: createModelSelector(createOpenRouterClient(requireApiKey())) },
-      ]
-    : [
-        { id: "offline-abstain", selector: ALWAYS_ABSTAIN },
-        { id: "offline-similarity", selector: similarityRankSelector() },
-      ];
 
   for (const group of grouped) {
     for (const entry of selectors) {
-      const result: SelectionEvalResult = await evaluateSelector(group.cases, entry.selector);
+      const result: SelectionEvalResult = await evaluateSelector(group.cases.map(probeCase), entry.selector);
       tierResults.push({
         tier: group.tier,
         fixtures: group.cases.length,
@@ -155,18 +155,16 @@ async function probeTierResults(execute: boolean): Promise<{ executed: boolean; 
       });
     }
   }
-  return { executed: execute, tierResults };
-}
-
-function requireApiKey(): string {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("--execute requires OPENROUTER_API_KEY");
-  return apiKey;
+  return { executed: execute, tierResults, jevSelector };
 }
 
 // --- report ---------------------------------------------------------------------
 
 async function commandReport(args: Args): Promise<void> {
+  // Fail fast: the --execute gate is checked before any work, not after it.
+  if (args.execute && !process.env.TYPESAFE_API_KEY?.trim()) {
+    throw new Error("--execute requires TYPESAFE_API_KEY");
+  }
   const recorded = await loadRecordedEpisodes(args.sessions);
   const baselines = baselineScores(recorded.episodes);
 
