@@ -47,9 +47,11 @@ export function evaluateReadPathGate(evidence: ReadPathEvidence): ReadPathVerdic
 /**
  * Frozen offline-evaluation outcome (TASK-0022, real corpus, 2026-09-19).
  *
- * See `.tmp/reports/19-09-26/task-0022-read-path-repair.md`. Deterministic
- * candidate generation reached top-1 8.6% / top-5 14.5% on 1411 mined pairs;
- * the bounded Jev probe produced 7 attempted selections with 2 wrong-target
+ * See `.tmp/reports/19-09-26/task-0022-read-path-repair.md`. Of **1411 mined
+ * pairs**, **747 were candidate-eligible**; deterministic candidate generation
+ * reached top-1 8.6% / top-5 14.5% **over those 747**. The bounded Jev probe
+ * (cap 200 = 179 unresolved + 21 evaluated = 7 selected + 3 abstain +
+ * 11 low-confidence, 2s timeout, zero retries) produced 2 wrong-target
  * selections and zero human-reviewed labels. The gate therefore FAILS and
  * runtime auto-mutation stays disabled; only shadow-only eligibility
  * instrumentation runs.
@@ -62,3 +64,27 @@ export const READ_PATH_EVIDENCE: ReadPathVerdict = evaluateReadPathGate({
   wrongTargets: 2,
   precision: 5 / 7,
 });
+
+/**
+ * Candidate-eligibility accounting for the frozen probe. Rates are over
+ * `candidateEligible` (747), never over `minedPairs` (1411).
+ */
+export interface ReadPathAccounting {
+  minedPairs: number;
+  candidateEligible: number;
+  cap: number;
+  beyondCap: number;
+  unresolved: number;
+  evaluated: number;
+  statuses: Record<string, number>;
+}
+
+export const READ_PATH_ACCOUNTING: ReadPathAccounting = {
+  minedPairs: 1411,
+  candidateEligible: 747,
+  cap: 200,
+  beyondCap: 547,
+  unresolved: 179,
+  evaluated: 21,
+  statuses: { selected: 7, abstain: 3, "low-confidence": 11 },
+};

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { READ_PATH_EVIDENCE, READ_PATH_GATE, evaluateReadPathGate, type ReadPathEvidence } from "./evidence-gate.ts";
+import { READ_PATH_ACCOUNTING, READ_PATH_EVIDENCE, READ_PATH_GATE, evaluateReadPathGate, type ReadPathEvidence } from "./evidence-gate.ts";
 
 function evidence(overrides: Partial<ReadPathEvidence> = {}): ReadPathEvidence {
   return { pairs: 100, reviewedLabels: 40, attemptedSelections: 40, correct: 40, wrongTargets: 0, precision: 1, ...overrides };
@@ -29,4 +29,21 @@ test("the frozen verdict reflects the failed offline evaluation and blocks mutat
   assert.equal(READ_PATH_EVIDENCE.evidence.wrongTargets, 2);
   assert.equal(READ_PATH_EVIDENCE.evidence.reviewedLabels, 0);
   assert.match(READ_PATH_EVIDENCE.reason, /wrong-target/);
+});
+
+test("frozen accounting is internally consistent: rates are over candidate-eligible pairs", () => {
+  const accounting = READ_PATH_ACCOUNTING;
+  const { selected, abstain, "low-confidence": lowConfidence } = accounting.statuses;
+
+  // 747 candidate-eligible = 200 capped + 547 beyond cap.
+  assert.equal(accounting.candidateEligible, accounting.cap + accounting.beyondCap);
+  assert.ok(accounting.candidateEligible < accounting.minedPairs, "not every mined pair is candidate-eligible");
+  // The cap covers unresolved plus evaluated pairs.
+  assert.equal(accounting.cap, accounting.unresolved + accounting.evaluated);
+  // Evaluated pairs are exactly the terminal statuses.
+  assert.equal(accounting.evaluated, selected! + abstain! + lowConfidence!);
+  assert.equal(accounting.evaluated, 21);
+  // Selection evidence agrees with the frozen verdict.
+  assert.equal(selected, READ_PATH_EVIDENCE.evidence.attemptedSelections);
+  assert.equal(READ_PATH_EVIDENCE.evidence.pairs, accounting.minedPairs);
 });

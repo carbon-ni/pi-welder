@@ -206,12 +206,26 @@ async function commandJev(args: Args): Promise<void> {
   };
   const verdict = evaluateReadPathGate(evidence);
 
+  // Explicit accounting: rates are over candidate-eligible pairs, not mined
+  // pairs. cap = unresolved + evaluated; evaluated = the terminal statuses.
+  const cap = Math.min(withCandidates.length, args.budget);
+  const accounting = {
+    minedPairs: pairs.length,
+    candidateEligible: withCandidates.length,
+    cap,
+    beyondCap: withCandidates.length - cap,
+    unresolved,
+    evaluated: attempted + abstained,
+    statuses,
+  };
+
   await mkdir(args.out, { recursive: true });
   const report = {
     label: "direction evidence only",
     gate: READ_PATH_GATE,
     hitRates,
     provisional: { ...evidence, abstained, unresolved, statuses },
+    accounting,
     verdict,
     // Privacy: the request payload shape only; no paths are written.
     requestShape: JSON.stringify(buildReadPathRequest({ requestedPath: "<relative>", candidates: [{ ordinal: 1, path: "<relative>" }] })),
