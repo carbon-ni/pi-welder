@@ -1,7 +1,7 @@
 ---
 id: TASK-0028
 title: Restore read-shaped calls sent to edit
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [edit, read, repair, tool-shape, safety]
