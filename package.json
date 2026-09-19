@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "lint": "tsc --noEmit",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm test",
+    "eval:direction": "node --experimental-strip-types scripts/direction-evals.ts report"
   },
   "pi": {
     "extensions": ["./src/index.ts"]
