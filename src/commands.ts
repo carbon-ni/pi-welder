@@ -23,6 +23,7 @@ import {
 } from "./recorder/index.ts";
 import { resetSessionState, setSourceShadowingEnabled, type WelderRuntime } from "./runtime.ts";
 import { welderStatusText } from "./handlers.ts";
+import { aggregateShadowStats, fromShadowEvidence, renderShadowStats } from "./model-recovery/shadow-stats.ts";
 
 export interface WelderCommandSpec {
   name: string;
@@ -113,6 +114,16 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
       name: "welder-stats",
       description: "Show pi-welder repair stats for this session",
       handler: async (_args, ctx) => { ctx.ui.notify(statsSummary(runtime.stats), "info"); },
+    },
+    {
+      name: "welder-shadow-stats",
+      description: "Show metadata-only Jev shadow activity and labels for this session",
+      handler: async (_args, ctx) => {
+        // Activity (submitted/completed/statuses/latency) stays separate from
+        // label states; no precision claim is possible without reviewed labels.
+        const stats = aggregateShadowStats(runtime.shadowEvidence.map(fromShadowEvidence), runtime.jevShadow?.submitted);
+        ctx.ui.notify(renderShadowStats(stats), "info");
+      },
     },
     {
       name: "welder-reset",

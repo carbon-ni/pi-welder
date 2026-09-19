@@ -17,6 +17,7 @@ function ctx(overrides: Partial<any> = {}): any {
 
 const expectedCommands = [
   ["welder-stats", "Show pi-welder repair stats for this session"],
+  ["welder-shadow-stats", "Show metadata-only Jev shadow activity and labels for this session"],
   ["welder-reset", "Reset pi-welder session stats and pending failures"],
   ["welder-log", "Show the path to this session's welder repair log"],
   ["welder-failures", "Show pending pi-welder tool failures and input keys"],
@@ -46,6 +47,27 @@ test("welder-settings notifies an error outside TUI mode", async () => {
   await spec.handler("", { mode: undefined, ui: { notify: (msg: string, kind: string) => { notified = { msg, kind }; } } } as any);
   assert.equal(notified!.kind, "error");
   assert.match(notified!.msg, /TUI/);
+});
+
+test("welder-shadow-stats reports metadata-only aggregates from live shadow evidence", async () => {
+  const runtime = createRuntime();
+  runtime.shadowEvidence.push(
+    { toolCallId: "call-1", candidateCount: 3, selectedOrdinal: 2, confidence: 0.97, latencyMs: 120, status: "selected", labelStatus: "provisional-correct" },
+    { toolCallId: "call-2", candidateCount: 2, confidence: 0.4, latencyMs: 80, status: "abstain", labelStatus: "pending" },
+  );
+  runtime.sourceShadowingEnabled = true;
+
+  let notified = "";
+  const spec = welderCommandSpecs(runtime).find((s) => s.name === "welder-shadow-stats")!;
+  await spec.handler("", { mode: undefined, ui: { notify: (msg: string) => { notified = msg; } } } as any);
+
+  assert.match(notified, /metadata only/);
+  assert.match(notified, /completed : 2/);
+  assert.match(notified, /selected  : 1/);
+  assert.match(notified, /abstained : 1/);
+  assert.match(notified, /provisional-correct: 1/);
+  // No toolCallIds, paths, or payloads in the summary.
+  assert.doesNotMatch(notified, /call-1|call-2|path|oldText|newText|toolCallId/);
 });
 
 // ─── mineFailures ───────────────────────────────────────────────────────

@@ -47,6 +47,8 @@ export interface JevShadow {
   shutdown(graceMs?: number): Promise<void>;
   drain(): Promise<void>;
   readonly inFlight: number;
+  /** Requests submitted this session (metadata-only observability, TASK-0027). */
+  readonly submitted: number;
 }
 
 export interface JevShadowOptions {
@@ -233,6 +235,10 @@ export function createJevShadow(options: JevShadowOptions): JevShadow {
 
     get inFlight(): number {
       return active ? 1 : 0;
+    },
+
+    get submitted(): number {
+      return submitted;
     },
   };
 }
