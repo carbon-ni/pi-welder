@@ -1,7 +1,7 @@
 ---
 id: TASK-0022
 title: Auto-restore missing read paths with bounded Jev ranking
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [read, recovery, typesafe, auto-repair, safety]
