@@ -1,7 +1,7 @@
 ---
 id: TASK-0025
 title: Run direction evals for welder instincts with fixtures
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [eval, fixtures, repairs, typesafe, direction]
