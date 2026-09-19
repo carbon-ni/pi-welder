@@ -23,6 +23,7 @@ import {
 } from "./handlers.ts";
 import { createRuntime } from "./runtime.ts";
 import { createTypeSafeJevClient } from "./infra/typesafe.ts";
+import { READ_PATH_PROMPT } from "./read-recovery/path-repair.ts";
 
 export default function (pi: ExtensionHost) {
   const config = loadWelderConfig();
@@ -33,6 +34,9 @@ export default function (pi: ExtensionHost) {
     // Client exists whenever an API key is present, so the setting can be
     // toggled on live; sourceShadowingEnabled alone controls actual use.
     jevClient: apiKey ? createTypeSafeJevClient({ apiKey }) : undefined,
+    // Read-path repair uses its own question/instructions and is gated by the
+    // readPathRepairEnabled setting plus the frozen evidence verdict.
+    readPathClient: apiKey ? createTypeSafeJevClient({ apiKey, prompt: READ_PATH_PROMPT }) : undefined,
   });
 
   pi.on("session_start", async (_event, ctx) => handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION));

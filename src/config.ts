@@ -8,6 +8,12 @@ export interface WelderConfig {
   repairsEnabled: boolean;
   disabledRepairs: string[];
   sourceShadowingEnabled: boolean;
+  /**
+   * TASK-0022 opt-in: repair missing read paths via bounded Jev ranking.
+   * Default OFF and independent of source-shadow consent; runtime mutation
+   * additionally requires the predeclared evidence gate to pass.
+   */
+  readPathRepairEnabled: boolean;
 }
 
 export const WELDER_CONFIG_PATH = join(homedir(), ".pi", "agent", "welder.json");
@@ -34,6 +40,7 @@ export function parseWelderConfig(value: unknown): WelderConfig {
     repairsEnabled: input.repairsEnabled !== false,
     disabledRepairs: parseDisabledRepairs(input.disabledRepairs),
     sourceShadowingEnabled: input.sourceShadowingEnabled === true,
+    readPathRepairEnabled: input.readPathRepairEnabled === true,
   };
 }
 

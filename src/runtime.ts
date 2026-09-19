@@ -3,6 +3,8 @@ import { createRecoveryState, type RecoveryState } from "./recovery.ts";
 import { createRepairWarningState, type RepairWarningState } from "./repair-warnings.ts";
 import { createEpisodeTracker, type EpisodeTracker } from "./episodes.ts";
 import { createJevShadow, type JevShadow, type ShadowEvidence } from "./model-recovery/jev-shadow.ts";
+import { createReadPathState, type ReadPathState } from "./read-recovery/state.ts";
+import { READ_PATH_EVIDENCE } from "./read-recovery/evidence-gate.ts";
 import type { JevClient } from "./infra/typesafe.ts";
 
 export interface WelderRuntime {
@@ -14,7 +16,17 @@ export interface WelderRuntime {
   disabledRepairs: ReadonlySet<string>;
   modelRepairReportingEnabled: boolean;
   sourceShadowingEnabled: boolean;
+  /** TASK-0022 opt-in; separate from source-shadow consent. */
+  readPathRepairEnabled: boolean;
+  /**
+   * True only when the predeclared evidence gate passes. Runtime mutation of
+   * read paths additionally requires this; it stays false until the gate does.
+   */
+  readPathMutationEnabled: boolean;
+  readPathState: ReadPathState;
   jevClient?: JevClient;
+  /** Separate client: read-path repair uses its own question/instructions. */
+  readPathClient?: JevClient;
   jevShadow?: JevShadow;
   shadowEvidence: ShadowEvidence[];
   /** Set by handlers to persist safe shadow metadata; never receives payloads. */
@@ -27,7 +39,11 @@ export interface RuntimeOptions {
   repairsEnabled?: boolean;
   disabledRepairs?: readonly string[];
   sourceShadowingEnabled?: boolean;
+  readPathRepairEnabled?: boolean;
+  /** Test-only override; production derives from the frozen evidence verdict. */
+  readPathMutationEnabled?: boolean;
   jevClient?: JevClient;
+  readPathClient?: JevClient;
   /** Injected in tests for deterministic ids/timestamps. */
   episodeClock?: { now(): number; nextId(): string };
 }
@@ -42,7 +58,11 @@ export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
     disabledRepairs: new Set(options.disabledRepairs ?? []),
     modelRepairReportingEnabled: options.modelRepairReportingEnabled ?? false,
     sourceShadowingEnabled: options.sourceShadowingEnabled ?? false,
+    readPathRepairEnabled: options.readPathRepairEnabled ?? false,
+    readPathMutationEnabled: options.readPathMutationEnabled ?? READ_PATH_EVIDENCE.passed,
+    readPathState: createReadPathState(),
     jevClient: options.jevClient,
+    readPathClient: options.readPathClient,
     shadowEvidence: [],
   };
   resetJevShadow(runtime);
@@ -57,6 +77,7 @@ export function resetSessionState(runtime: WelderRuntime): void {
   runtime.repairWarnings = createRepairWarningState();
   runtime.episodes = createEpisodeTracker();
   runtime.shadowEvidence = [];
+  runtime.readPathState = createReadPathState();
   resetJevShadow(runtime);
 }
 

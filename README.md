@@ -85,6 +85,33 @@ This is **off by default** and requires two things: the persisted setting below 
 }
 ```
 
+### Jev read-path repair (opt-in, sends relative paths off-machine)
+
+When a `read` targets a path that does not exist, welder can generate up to 5
+nearby existing files, ask TypeSafe's Jev to rank one, and — only if the
+predeclared evidence gate passes — transparently replace `read.path`. This is
+**off by default**, requires the persisted setting below **and** a
+`TYPESAFE_API_KEY`, and is **independent of source shadowing** (`sourceShadowingEnabled`
+does not enable it).
+
+When enabled, **relative repository paths leave this machine**: the requested
+relative path plus up to 5 candidate relative paths. No file contents, source
+windows, credentials, absolute paths, or conversation payload are sent; logs
+persist only counts and statuses, never paths.
+
+> **Safety:** a wrong read can silently mislead later reasoning. Automatic
+> repair therefore stays disabled until the predeclared gate passes — at least
+> 30 **human-reviewed** labels, precision ≥ 0.99 at the 0.9 confidence
+> threshold, and zero wrong-target selections. The current offline evidence
+> (TASK-0022) failed that gate, so the feature runs **shadow-only**: eligible
+> missing reads are counted, nothing is sent, and no path is mutated.
+
+```json
+{
+  "readPathRepairEnabled": true
+}
+```
+
 ## Architecture
 
 ```

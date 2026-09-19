@@ -48,6 +48,13 @@ export function welderSettingItems(config: WelderConfig): WelderSettingItem[] {
       values: [...ON_OFF],
     },
     {
+      id: "readPathRepairEnabled",
+      label: "Jev read-path repair",
+      description: "Send relative repo paths to TypeSafe to repair missing reads; a wrong read can mislead later reasoning (independent of source shadowing)",
+      currentValue: config.readPathRepairEnabled ? "on" : "off",
+      values: [...ON_OFF],
+    },
+    {
       id: "recoveryGuidanceLimit",
       label: "Failure history limit",
       description: "Max recent tool failures retained for explicit diagnostics",
@@ -76,6 +83,9 @@ export function applyWelderSetting(config: WelderConfig, id: string, value: stri
   }
   if (id === "sourceShadowingEnabled") {
     return { ...config, sourceShadowingEnabled: value === "on" };
+  }
+  if (id === "readPathRepairEnabled") {
+    return { ...config, readPathRepairEnabled: value === "on" };
   }
   if (id === "recoveryGuidanceLimit") {
     const limit = Number(value);

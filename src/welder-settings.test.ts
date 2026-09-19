@@ -5,12 +5,12 @@ import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { REPAIR_NAMES } from "./repair-names.ts";
 import type { WelderConfig } from "./config.ts";
 
-const off: WelderConfig = { modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false };
-const on: WelderConfig = { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false };
+const off: WelderConfig = { modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false };
+const on: WelderConfig = { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false };
 
 test("welderSettingItems reflects current config values as on/off", () => {
   const items = welderSettingItems(off);
-  assert.equal(items.length, 4 + REPAIR_NAMES.length);
+  assert.equal(items.length, 5 + REPAIR_NAMES.length);
   const reporting = items.find((it) => it.id === "modelRepairReportingEnabled")!;
   assert.equal(reporting.currentValue, "off");
   assert.deepEqual(reporting.values, ["on", "off"]);
@@ -25,7 +25,7 @@ test("welderSettingItems shows on when flag enabled", () => {
 });
 
 test("welderSettingItems explains source leaves the machine", () => {
-  const item = welderSettingItems({ ...off, sourceShadowingEnabled: true }).find((it) => it.id === "sourceShadowingEnabled")!;
+  const item = welderSettingItems({ ...off, sourceShadowingEnabled: true, readPathRepairEnabled: false }).find((it) => it.id === "sourceShadowingEnabled")!;
   assert.equal(item.currentValue, "on");
   assert.match(item.description ?? "", /leaves this machine/);
 });
@@ -58,7 +58,7 @@ test("applyWelderSetting toggles model repair reporting off", () => {
 
 test("applyWelderSetting toggles source shadowing", () => {
   assert.equal(applyWelderSetting(off, "sourceShadowingEnabled", "on").sourceShadowingEnabled, true);
-  assert.equal(applyWelderSetting({ ...off, sourceShadowingEnabled: true }, "sourceShadowingEnabled", "off").sourceShadowingEnabled, false);
+  assert.equal(applyWelderSetting({ ...off, sourceShadowingEnabled: true, readPathRepairEnabled: false }, "sourceShadowingEnabled", "off").sourceShadowingEnabled, false);
 });
 
 test("applyWelderSetting toggles repairs off and on", () => {

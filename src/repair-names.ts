@@ -16,6 +16,7 @@ export const REPAIR_NAMES: readonly string[] = Object.freeze([
   ...resultRepairRules.map((rule) => rule.name),
   "resolve-ambiguous-edit",
   "restore-read-shape",
+  "restore-read-path",
 ]);
 
 export function isKnownRepairName(name: string): boolean {

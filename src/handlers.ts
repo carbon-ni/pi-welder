@@ -26,6 +26,8 @@ import { logDir, modelMeta, sessionId } from "./infra/pi/context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 import type { EpisodeRecord } from "./episodes.ts";
 import { buildRestoreReadReason, recognizeReadShapedEdit } from "./read-shape.ts";
+import { planReadPathRepair, runReadPathSelection, validateReadPathSelection } from "./read-recovery/path-repair.ts";
+import { recordReadPathSelection } from "./read-recovery/state.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
 
@@ -120,6 +122,33 @@ export async function handleToolCall(
       recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
       callActions.push("resolve-ambiguous-edit");
       await recordResultRepairEvent(ctx, event.toolName, input as Record<string, unknown>, repairs);
+    }
+  }
+
+  // TASK-0022: missing-read path repair. Opt-in and independent of source
+  // shadowing; the actual mutation also requires the evidence gate to pass.
+  // While the gate fails, this is shadow-only instrumentation: eligibility is
+  // counted and nothing else happens (no API call, no mutation).
+  if (runtime.enabled && event.toolName === "read" && runtime.readPathRepairEnabled && runtime.readPathClient) {
+    const client = runtime.readPathClient;
+    const plan = await planReadPathRepair({ toolInput: input as Record<string, unknown>, cwd: ctx.cwd });
+    if (plan && runtime.readPathMutationEnabled) {
+      const selection = await runReadPathSelection({ client, plan });
+      recordReadPathSelection(runtime.readPathState, selection.status);
+      if (selection.status === "selected" && selection.selectedOrdinal !== undefined) {
+        const validated = await validateReadPathSelection({ plan, ordinal: selection.selectedOrdinal, cwd: ctx.cwd });
+        if (validated) {
+          const repairs: Repair[] = [{ field: "path", action: "restore-read-path" }];
+          input.path = validated;
+          recordRepairs(runtime.stats, repairs);
+          recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
+          if (ctx.hasUI) ctx.ui.setStatus("welder", repairStatusText(event.toolName, repairs));
+          await recordRepairEvent(ctx, event.toolName, { result: input as Record<string, unknown>, repairs });
+        }
+      }
+    } else if (plan) {
+      // Gate not met: shadow-only eligibility evidence, zero API calls.
+      runtime.readPathState.eligible++;
     }
   }
 

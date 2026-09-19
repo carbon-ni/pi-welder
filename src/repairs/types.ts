@@ -21,6 +21,7 @@ export const REPAIR_ACTIONS = [
   "edit-noop",
   "resolve-ambiguous-edit",
   "restore-read-shape",
+  "restore-read-path",
 ] as const;
 
 export type RepairAction = (typeof REPAIR_ACTIONS)[number];

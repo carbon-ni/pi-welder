@@ -281,6 +281,87 @@ test("handleToolCall skips read-shape restoration when repairs are off", async (
   assert.equal(outcome, undefined);
 });
 
+test("read-path repair is off by default and independent of source shadowing", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
+  await writeFile(path.join(root, "config.ts"), "x");
+  const client = { choose: async () => { throw new Error("must not be called"); } };
+  const runtime = createRuntime({ sourceShadowingEnabled: true, readPathClient: client as any });
+  const event = { toolName: "read", toolCallId: "c", input: { path: "confg.ts" } };
+
+  await handleToolCall(runtime, event as any, ctx({ cwd: root }));
+
+  assert.equal(runtime.readPathState.eligible, 0, "source-shadow consent must not enable path repair");
+  assert.deepEqual(event.input, { path: "confg.ts" });
+});
+
+test("read-path repair with the gate unmet is shadow-only: eligibility counted, no API call, no mutation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
+  await writeFile(path.join(root, "config.ts"), "x");
+  let calls = 0;
+  const client = { choose: async () => { calls++; return { choice: 1, confidence: 0.99 }; } };
+  // readPathMutationEnabled defaults to the frozen gate verdict (false).
+  const runtime = createRuntime({ readPathRepairEnabled: true, readPathClient: client as any });
+  const event = { toolName: "read", toolCallId: "c", input: { path: "confg.ts" } };
+
+  await handleToolCall(runtime, event as any, ctx({ cwd: root }));
+
+  assert.equal(runtime.readPathState.eligible, 1);
+  assert.equal(calls, 0, "gate unmet: no API call");
+  assert.deepEqual(event.input, { path: "confg.ts" }, "gate unmet: no mutation");
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-path"), undefined);
+});
+
+test("read-path repair mutates read.path exactly when the gate is met and the selection is validated", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "config.ts"), "x");
+  let calls = 0;
+  const client = { choose: async () => { calls++; return { choice: 1, confidence: 0.99, model: "jev" }; } };
+  const runtime = createRuntime({ readPathRepairEnabled: true, readPathMutationEnabled: true, readPathClient: client as any });
+  const event = { toolName: "read", toolCallId: "c", input: { path: "src/confg.ts", limit: 10 } };
+
+  await handleToolCall(runtime, event as any, ctx({ cwd: root }));
+
+  assert.equal(calls, 1, "one bounded request, zero retries");
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-path"), 1);
+  assert.equal(event.input.path, "src/config.ts", "only path is mutated");
+  assert.equal(event.input.limit, 10, "other fields untouched");
+  assert.equal(runtime.readPathState.selected, 1);
+});
+
+test("read-path repair leaves the call unchanged on abstain, low confidence, failure, and invalid selections", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "config.ts"), "x");
+
+  const scenarios: (() => Promise<unknown>)[] = [
+    async () => ({ choice: null, confidence: 0.5 }),
+    async () => ({ choice: 1, confidence: 0.4 }),
+    async () => ({ choice: 9, confidence: 0.99 }),
+    async () => { throw Object.assign(new Error("429"), { kind: "rate-limited" }); },
+    async () => { throw new Error("boom"); },
+  ];
+
+  for (const choose of scenarios) {
+    const runtime = createRuntime({ readPathRepairEnabled: true, readPathMutationEnabled: true, readPathClient: { choose } as any });
+    const event = { toolName: "read", toolCallId: "c", input: { path: "src/confg.ts" } };
+    await handleToolCall(runtime, event as any, ctx({ cwd: root }));
+    assert.deepEqual(event.input, { path: "src/confg.ts" });
+    assert.equal(runtime.stats.repairsByAction.get("restore-read-path"), undefined);
+  }
+});
+
+test("read-path repair never mutates non-read tools or eligibility-failing reads", async () => {
+  const runtime = createRuntime({ readPathRepairEnabled: true, readPathMutationEnabled: true, readPathClient: { choose: async () => ({ choice: 1, confidence: 0.99 }) } as any });
+  const editEvent = { toolName: "edit", toolCallId: "c", input: { path: "src/confg.ts" } };
+  await handleToolCall(runtime, editEvent as any, ctx());
+  assert.deepEqual(editEvent.input, { path: "src/confg.ts" });
+
+  const existing = { toolName: "read", toolCallId: "c2", input: { path: "package.json" } };
+  await handleToolCall(runtime, existing as any, ctx({ cwd: process.cwd() }));
+  assert.deepEqual(existing.input, { path: "package.json" }, "existing file is not eligible");
+});
+
 test("handleToolCall skips ambiguous-edit preflight when resolve-ambiguous-edit is disabled", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-handler-"));
   const current = [
