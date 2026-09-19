@@ -1,7 +1,7 @@
 ---
 id: TASK-0027
 title: Observe live Jev shadow outcomes
-status: doing
+status: done
 depends_on: []
 priority: normal
 tags: [typesafe, shadow, observability, metrics, safety]
