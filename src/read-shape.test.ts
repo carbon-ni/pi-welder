@@ -48,6 +48,43 @@ test("rejects invalid numeric ranges and non-integers", () => {
   assert.equal(recognizeReadShapedEdit({ path: "a.ts", startLine: "1", endLine: 4 }), undefined);
 });
 
+test("the recognizer is pure: rejected inputs are returned undefined and never mutated", () => {
+  const cases: unknown[] = [
+    { path: "a.ts", edits: [{ oldText: "a", newText: "b" }], offset: 3 },
+    { path: "a.ts", oldText: "a", newText: "b" },
+    { path: "a.ts", edits: [] },
+    { path: "a.ts", offset: 3, verbose: true },
+    { path: "a.ts", offset: 3, startLine: 3, endLine: 9 },
+    { path: "a.ts", offset: 0 },
+    { path: "a.ts", startLine: 5, endLine: 4 },
+    { path: "a.ts", startLine: "1", endLine: 4 },
+    { path: "" },
+    { offset: 1, limit: 2 },
+    {},
+    [{ path: "a.ts" }],
+    ["a.ts"],
+    null,
+    "a.ts",
+    42,
+  ];
+
+  for (const input of cases) {
+    const snapshot = structuredClone(input);
+    assert.equal(recognizeReadShapedEdit(input), undefined, JSON.stringify(input));
+    // The restoration itself must never mutate a rejected call; independent
+    // repairs (handled elsewhere) remain free to act on it.
+    assert.deepEqual(input, snapshot, `mutated: ${JSON.stringify(input)}`);
+  }
+});
+
+test("the recognizer is pure: recognized inputs are read-only", () => {
+  const input = { path: "a.ts", offset: 3, limit: 2 };
+  const snapshot = structuredClone(input);
+  assert.deepEqual(recognizeReadShapedEdit(input), { path: "a.ts", offset: 3, limit: 2 });
+  assert.deepEqual(input, snapshot);
+  assert.notEqual(recognizeReadShapedEdit(input), input, "a fresh read call is returned, never the input");
+});
+
 test("renders the exact corrected read call and a truthful, non-success reason", () => {
   assert.equal(renderRestoredReadCall({ path: "src/a b.ts", offset: 3, limit: 2 }), '{"name":"read","arguments":{"path":"src/a b.ts","offset":3,"limit":2}}');
   assert.equal(renderRestoredReadCall({ path: "src/a.ts" }), '{"name":"read","arguments":{"path":"src/a.ts"}}');

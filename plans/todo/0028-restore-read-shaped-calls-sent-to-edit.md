@@ -20,7 +20,7 @@ An `edit` call containing only a valid read argument shape is restored to the eq
 - [ ] Recognize only closed read shapes with a string path and no `edits`, `oldText`, or `newText` fields:
   - `path` plus optional integer `offset`/`limit`;
   - `path`, integer `startLine`, integer `endLine`, converted deterministically to `offset=startLine`, `limit=endLine-startLine+1`.
-- [ ] Reject ambiguous, mixed, invalid-range, content-bearing, or unknown-field calls unchanged.
+- [ ] Reject ambiguous, mixed, invalid-range, content-bearing, or unknown-field calls from this restoration without mutation; existing independent structural repair rules remain eligible.
 - [ ] Prefer actual reroute when the host API supports it; otherwise block the doomed edit and emit the exact corrected `read` call once.
 - [ ] Restoration is transparent and recorded as a distinct action; it never reports a successful edit.
 - [ ] No Jev/model call, filesystem pre-read, source logging, or path rewriting.

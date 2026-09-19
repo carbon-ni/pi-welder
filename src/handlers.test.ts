@@ -199,7 +199,7 @@ test("the block result exposes only Pi's supported blocking fields (host-capabil
   assert.equal(typeof outcome!.reason, "string");
 });
 
-test("handleToolCall leaves mixed, unknown-field, invalid-range, and content-bearing calls unchanged", async () => {
+test("handleToolCall applies no restore-read-shape action to mixed, unknown-field, invalid-range, or content-bearing calls", async () => {
   const cases = [
     { path: "a.ts", edits: [{ oldText: "a", newText: "b" }], offset: 3 },
     { path: "a.ts", oldText: "a", newText: "b" },
@@ -216,6 +216,44 @@ test("handleToolCall leaves mixed, unknown-field, invalid-range, and content-bea
     assert.equal(outcome, undefined, JSON.stringify(input));
     assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), undefined, JSON.stringify(input));
   }
+});
+
+test("restore-read-shape rejection leaves existing independent repairs eligible (nest-edit-fields regression)", async () => {
+  // Direct oldText/newText is content-bearing for the restoration and must
+  // still be repaired by nest-edit-fields exactly as before TASK-0028.
+  const runtime = createRuntime();
+  const event = { toolName: "edit", toolCallId: "c", input: { path: "a.ts", oldText: "x", newText: "y" } };
+
+  const outcome = await handleToolCall(runtime, event as any, ctx());
+
+  assert.equal(outcome, undefined, "restoration must not block a repairable edit");
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), undefined);
+  assert.equal(runtime.stats.repairsByAction.get("nest-edit-fields"), 1);
+  assert.deepEqual(event.input, { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] });
+});
+
+test("restore-read-shape rejection still routes mixed shapes through independent repairs", async () => {
+  const runtime = createRuntime();
+  const event = { toolName: "edit", toolCallId: "c", input: { path: "a.ts", offset: 3, edits: [{ oldText: "a", newText: "b" }] } };
+
+  await handleToolCall(runtime, event as any, ctx());
+
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), undefined);
+  // The call flowed through repairArgs (existing behavior), not suppressed.
+  assert.equal(runtime.stats.totalToolCalls, 1);
+  assert.equal(runtime.stats.repairsByAction.get("relational-default"), 1);
+});
+
+test("restore-read-shape recognition runs before repairArgs, so recognized calls are not arg-mutated", async () => {
+  const runtime = createRuntime();
+  const event = { toolName: "edit", toolCallId: "c", input: { path: "a.ts", offset: 3 } };
+
+  const outcome = await handleToolCall(runtime, event as any, ctx());
+
+  assert.ok(outcome?.block);
+  // repairArgs would have injected a default limit; recognition must precede it.
+  assert.equal(runtime.stats.repairsByAction.get("relational-default"), undefined);
+  assert.deepEqual(event.input, { path: "a.ts", offset: 3 });
 });
 
 test("handleToolCall does not block read-shaped input on non-edit tools", async () => {
