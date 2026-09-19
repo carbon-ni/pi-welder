@@ -157,6 +157,92 @@ test("handleToolCall skips per-name disabled repairs (parse-json)", async () => 
   assert.equal(event.input.options, '{"a":1}');
 });
 
+test("handleToolCall blocks a read-shaped edit and returns the exact corrected read call", async () => {
+  const runtime = createRuntime();
+  // cwd and path deliberately do not exist: no filesystem pre-read may happen.
+  const event = { toolName: "edit", toolCallId: "c1", input: { path: "missing/a.ts", offset: 3, limit: 2 } };
+
+  const outcome = await handleToolCall(runtime, event as any, ctx({ cwd: "/nonexistent-root" }));
+
+  assert.ok(outcome);
+  assert.equal(outcome.block, true);
+  assert.match(outcome.reason, /blocked this edit/);
+  assert.match(outcome.reason, /no edit was applied/);
+  assert.match(outcome.reason, /\{"name":"read","arguments":\{"path":"missing\/a\.ts","offset":3,"limit":2\}\}/);
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), 1);
+  assert.equal(runtime.stats.totalToolCalls, 1);
+  assert.deepEqual(event.input, { path: "missing/a.ts", offset: 3, limit: 2 });
+});
+
+test("handleToolCall converts a startLine/endLine read shape deterministically", async () => {
+  const runtime = createRuntime();
+  const event = { toolName: "edit", toolCallId: "c2", input: { path: "src/a.ts", startLine: 10, endLine: 20 } };
+
+  const outcome = await handleToolCall(runtime, event as any, ctx());
+
+  assert.ok(outcome);
+  assert.match(outcome.reason, /"offset":10,"limit":11/);
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), 1);
+});
+
+test("the block result exposes only Pi's supported blocking fields (host-capability fallback)", async () => {
+  const runtime = createRuntime();
+  const event = { toolName: "edit", toolCallId: "c3", input: { path: "a.ts" } };
+
+  const outcome = await handleToolCall(runtime, event as any, ctx());
+
+  // Pi 0.85.0 ToolCallEventResult is { block?: boolean; reason?: string }.
+  // No tool-identity replacement exists, so blocking plus an exact corrected
+  // call in the reason is the strongest supported behavior.
+  assert.deepEqual(Object.keys(outcome!).sort(), ["block", "reason"]);
+  assert.equal(outcome!.block, true);
+  assert.equal(typeof outcome!.reason, "string");
+});
+
+test("handleToolCall leaves mixed, unknown-field, invalid-range, and content-bearing calls unchanged", async () => {
+  const cases = [
+    { path: "a.ts", edits: [{ oldText: "a", newText: "b" }], offset: 3 },
+    { path: "a.ts", oldText: "a", newText: "b" },
+    { path: "a.ts", offset: 3, verbose: true },
+    { path: "a.ts", offset: 3, startLine: 3, endLine: 9 },
+    { path: "a.ts", offset: 0 },
+    { path: "a.ts", startLine: 5, endLine: 4 },
+    { path: "a.ts", edits: [{ oldText: "a", newText: "b" }] },
+  ];
+
+  for (const input of cases) {
+    const runtime = createRuntime();
+    const outcome = await handleToolCall(runtime, { toolName: "edit", toolCallId: "c", input } as any, ctx());
+    assert.equal(outcome, undefined, JSON.stringify(input));
+    assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), undefined, JSON.stringify(input));
+  }
+});
+
+test("handleToolCall does not block read-shaped input on non-edit tools", async () => {
+  const runtime = createRuntime();
+  const outcome = await handleToolCall(runtime, { toolName: "read", toolCallId: "c", input: { path: "a.ts", offset: 3 } } as any, ctx());
+  assert.equal(outcome, undefined);
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), undefined);
+});
+
+test("handleToolCall skips read-shape restoration when restore-read-shape is disabled", async () => {
+  const runtime = createRuntime();
+  runtime.disabledRepairs = new Set(["restore-read-shape"]);
+  const event = { toolName: "edit", toolCallId: "c", input: { path: "a.ts", offset: 3, limit: 2 } };
+
+  const outcome = await handleToolCall(runtime, event as any, ctx());
+
+  assert.equal(outcome, undefined);
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-shape"), undefined);
+  assert.deepEqual(event.input, { path: "a.ts", offset: 3, limit: 2 });
+});
+
+test("handleToolCall skips read-shape restoration when repairs are off", async () => {
+  const runtime = createRuntime({ repairsEnabled: false });
+  const outcome = await handleToolCall(runtime, { toolName: "edit", toolCallId: "c", input: { path: "a.ts", offset: 3 } } as any, ctx());
+  assert.equal(outcome, undefined);
+});
+
 test("handleToolCall skips ambiguous-edit preflight when resolve-ambiguous-edit is disabled", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-handler-"));
   const current = [

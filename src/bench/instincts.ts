@@ -19,6 +19,7 @@ import { REPAIR_ACTIONS } from "../repairs/types.ts";
 import { repairArgs } from "../repairs/index.ts";
 import { preflightEditMismatch } from "../model-recovery/edit-mismatch.ts";
 import { repairToolResult, type ToolResultShape } from "../result-repairs/index.ts";
+import { recognizeReadShapedEdit } from "../read-shape.ts";
 
 export type FixtureFamily =
   | "arg-malformation"
@@ -247,6 +248,26 @@ export const INSTINCT_FIXTURES: readonly InstinctFixture[] = [
     expectResolved: false,
   },
 
+  // --- read-shaped edit (TASK-0028: call-time shape restoration) ---
+  {
+    fixtureId: "edit-read-shaped-offset",
+    family: "edit-ambiguous",
+    source: "edit/EDIT_INVALID_SHAPE x370 read args (path + offset/limit)",
+    toolName: "edit",
+    toolInput: { path: "src/example.ts", offset: 3, limit: 5 },
+    expectedRepairs: ["restore-read-shape"],
+    expectResolved: true,
+  },
+  {
+    fixtureId: "edit-read-shaped-range",
+    family: "edit-ambiguous",
+    source: "edit/EDIT_INVALID_SHAPE x370 read args (path + startLine/endLine)",
+    toolName: "edit",
+    toolInput: { path: "src/example.ts", startLine: 3, endLine: 7 },
+    expectedRepairs: ["restore-read-shape"],
+    expectResolved: true,
+  },
+
   // --- result-repair shapes ---
   {
     fixtureId: "edit-noop-verified",
@@ -353,17 +374,23 @@ async function runFixture(fixture: InstinctFixture, root: string): Promise<Fixtu
   let resolved = false;
 
   if (fixture.toolInput) {
-    // Copy: repairArgs mutates nested structures in place.
-    const argResult = repairArgs(structuredClone(fixture.toolInput), { toolName: fixture.toolName });
-    actions.push(...argResult.repairs.map((repair) => repair.action));
-    // An arg repair fixes the arriving shape; that is the resolution for the
-    // arg lane. Edit inputs additionally run the deterministic preflight.
-    resolved = argResult.repairs.length > 0;
-    if (fixture.toolName === "edit") {
-      const preflight = await preflightEditMismatch({ toolInput: argResult.result, cwd: root });
-      if (preflight) {
-        actions.push("resolve-ambiguous-edit");
-        resolved = true;
+    // Call-time shape restoration runs before repairArgs in the live pipeline.
+    if (fixture.toolName === "edit" && recognizeReadShapedEdit(fixture.toolInput)) {
+      actions.push("restore-read-shape");
+      resolved = true;
+    } else {
+      // Copy: repairArgs mutates nested structures in place.
+      const argResult = repairArgs(structuredClone(fixture.toolInput), { toolName: fixture.toolName });
+      actions.push(...argResult.repairs.map((repair) => repair.action));
+      // An arg repair fixes the arriving shape; that is the resolution for the
+      // arg lane. Edit inputs additionally run the deterministic preflight.
+      resolved = argResult.repairs.length > 0;
+      if (fixture.toolName === "edit") {
+        const preflight = await preflightEditMismatch({ toolInput: argResult.result, cwd: root });
+        if (preflight) {
+          actions.push("resolve-ambiguous-edit");
+          resolved = true;
+        }
       }
     }
   } else if (fixture.result) {

@@ -20,6 +20,7 @@ export const REPAIR_ACTIONS = [
   "read-offset-context",
   "edit-noop",
   "resolve-ambiguous-edit",
+  "restore-read-shape",
 ] as const;
 
 export type RepairAction = (typeof REPAIR_ACTIONS)[number];

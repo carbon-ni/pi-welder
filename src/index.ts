@@ -3,8 +3,9 @@
  *
  * One `tool_call` handler applies a finite set of structural repairs
  * (null-strip, JSON parse, array wrap, type coercion, …) before the tool
- * runs. Repairs are transparent and content fields are never touched.
- * Every repair is logged to `.pi/welder-log/<sessionId>.jsonl`.
+ * runs, and blocks read-shaped `edit` calls with the exact corrected `read`
+ * call (TASK-0028). Repairs are transparent and content fields are never
+ * touched. Every repair is logged to `.pi/welder-log/<sessionId>.jsonl`.
  *
  * Commands: /welder-stats · /welder-reset · /welder-log · /welder-failures · /welder-clear · /welder-settings
  */

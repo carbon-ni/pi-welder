@@ -25,6 +25,7 @@ import {
 import { logDir, modelMeta, sessionId } from "./infra/pi/context.ts";
 import { resetSessionState, type WelderRuntime } from "./runtime.ts";
 import type { EpisodeRecord } from "./episodes.ts";
+import { buildRestoreReadReason, recognizeReadShapedEdit } from "./read-shape.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
 
@@ -67,13 +68,36 @@ async function appendEpisodeRecords(records: readonly EpisodeRecord[], ctx?: Wel
   }
 }
 
+/**
+ * Tool-call outcome. Pi's `ToolCallEventResult` supports blocking only
+ * (`{ block?: boolean; reason?: string }`); it cannot replace tool identity,
+ * so a restored read call is delivered through the block reason.
+ */
+export type ToolCallOutcome = { block: true; reason: string } | undefined;
+
 export async function handleToolCall(
   runtime: WelderRuntime,
   event: ToolCallEvent,
   ctx: WelderContext,
-): Promise<undefined> {
+): Promise<ToolCallOutcome> {
   const input = event.input;
   if (!input || typeof input !== "object") return undefined;
+
+  // Read-shaped edit: recognized on the ORIGINAL input (repairArgs could add
+  // defaults), blocked before execution, and answered with the exact read call.
+  if (runtime.enabled && event.toolName === "edit" && !runtime.disabledRepairs.has("restore-read-shape")) {
+    const restoredRead = recognizeReadShapedEdit(input);
+    if (restoredRead) {
+      runtime.stats.totalToolCalls++;
+      const repairs: Repair[] = [{ field: "input", action: "restore-read-shape" }];
+      recordRepairs(runtime.stats, repairs);
+      recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
+      if (ctx.hasUI) ctx.ui.setStatus("welder", repairStatusText(event.toolName, repairs));
+      await recordRepairEvent(ctx, event.toolName, { result: input as Record<string, unknown>, repairs });
+      runtime.episodes.observeCall({ toolName: event.toolName, actions: ["restore-read-shape"] });
+      return { block: true, reason: buildRestoreReadReason(restoredRead) };
+    }
+  }
 
   const repair = repairToolInput(runtime, event.toolName, input as Record<string, unknown>);
   const callActions = repair.repairs.map((r) => r.action);
