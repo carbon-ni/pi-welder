@@ -22,7 +22,23 @@ interface TypeSafeClientOptions {
   endpoint?: string;
   model?: string;
   fetch?: typeof globalThis.fetch;
+  /** Question/instructions override for offline eval tuning. Defaults preserve live behavior exactly. */
+  prompt?: JevPromptSpec;
 }
+
+/** The question/instructions surface a probe may tune. Schema keys stay fixed. */
+export interface JevPromptSpec {
+  instructions: string;
+  abstainCriteria: string;
+  candidateCriteria: (ordinal: number) => string;
+}
+
+/** Frozen default — the live shadow pipeline depends on this byte-for-byte. */
+export const DEFAULT_JEV_PROMPT: JevPromptSpec = {
+  instructions: "Which candidate is the intended exact edit target? Choose abstain when the evidence is insufficient.",
+  abstainCriteria: "No candidate is sufficiently supported; do not select one.",
+  candidateCriteria: (ordinal) => `Candidate ${ordinal}`,
+};
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
@@ -62,12 +78,13 @@ export function createTypeSafeJevClient(options: TypeSafeClientOptions): JevClie
   const request = options.fetch ?? globalThis.fetch;
   const endpoint = options.endpoint ?? "https://api.typesafe.ai/v1/systemone";
   const model = options.model ?? "jev-latest";
+  const prompt = options.prompt ?? DEFAULT_JEV_PROMPT;
 
   return {
     async choose(input, signal): Promise<JevSelectionResponse> {
       const criteria: Record<string, string> = {
-        ...Object.fromEntries(input.candidates.map((candidate) => [`candidate-${candidate.ordinal}`, `Candidate ${candidate.ordinal}`])),
-        abstain: "No candidate is sufficiently supported; do not select one.",
+        ...Object.fromEntries(input.candidates.map((candidate) => [`candidate-${candidate.ordinal}`, prompt.candidateCriteria(candidate.ordinal)])),
+        abstain: prompt.abstainCriteria,
       };
       const body = {
         state: {
@@ -78,7 +95,7 @@ export function createTypeSafeJevClient(options: TypeSafeClientOptions): JevClie
         questions: {
           selection: {
             type: "choice",
-            instructions: "Which candidate is the intended exact edit target? Choose abstain when the evidence is insufficient.",
+            instructions: prompt.instructions,
             criteria,
           },
         },

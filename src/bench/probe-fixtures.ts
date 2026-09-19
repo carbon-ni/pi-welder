@@ -248,8 +248,8 @@ export function jevProbeRequest(fixture: ProbeFixture): JevProbeRequest {
 
 export interface JevProbeSelector extends EditSelector {
   id: string;
-  /** Successful raw Jev responses (caseId + confidence), for tier curves. */
-  responses: { caseId: string; response: JevSelectionResponse }[];
+  /** Successful raw Jev responses (caseId + confidence + latency), for tier curves. */
+  responses: { caseId: string; response: JevSelectionResponse; latencyMs: number }[];
 }
 
 /**
@@ -261,9 +261,10 @@ export function createJevProbeSelector(
   client: JevClient,
   requests: readonly JevProbeRequest[],
   timeoutMs = 2_000,
+  now: () => number = () => Date.now(),
 ): JevProbeSelector {
   const byCase = new Map(requests.map((entry) => [entry.case.caseId, entry]));
-  const responses: { caseId: string; response: JevSelectionResponse }[] = [];
+  const responses: { caseId: string; response: JevSelectionResponse; latencyMs: number }[] = [];
   return {
     id: "jev-ordinal",
     responses,
@@ -272,9 +273,10 @@ export function createJevProbeSelector(
       if (!entry) return { abstain: true }; // fail closed on unknown cases
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const startedAt = now();
       try {
         const answer = await client.choose(entry.request, controller.signal);
-        responses.push({ caseId: selectionCase.caseId, response: answer });
+        responses.push({ caseId: selectionCase.caseId, response: answer, latencyMs: Math.max(0, now() - startedAt) });
         if (answer.choice === null) return { abstain: true };
         if (!entry.request.candidates.some((candidate) => candidate.ordinal === answer.choice)) {
           return { abstain: true }; // out-of-range ordinals are not selections

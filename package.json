@@ -8,7 +8,8 @@
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "lint": "tsc --noEmit",
     "check": "npm run lint && npm test",
-    "eval:direction": "node --experimental-strip-types scripts/direction-evals.ts report"
+    "eval:direction": "node --experimental-strip-types scripts/direction-evals.ts report",
+    "eval:tune": "node --experimental-strip-types scripts/jev-tune.ts probe"
   },
   "pi": {
     "extensions": ["./src/index.ts"]
