@@ -27,6 +27,37 @@ export interface BuildAmbiguousShadowOptions {
 }
 
 /**
+ * Contained read of a tool-input path: the file's real path must lie strictly
+ * inside the cwd's real path, and the content must fit the source byte cap.
+ * Single-sourced so live shadowing and offline replay (TASK-0024) cannot
+ * drift apart on containment or size semantics.
+ */
+export async function readContainedSource(
+  options: { cwd: string; target: string; fileSystem?: FileSystem },
+): Promise<string | undefined> {
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  // Symlink-safe containment: the file's real path must lie strictly inside
+  // the cwd's real path. Unreadable, escaping, or equal-to-root paths are
+  // never transmitted.
+  const realRoot = await fileSystem.realpath?.(resolve(options.cwd)).catch(() => undefined);
+  const realFile = await fileSystem.realpath?.(resolve(options.cwd, options.target)).catch(() => undefined);
+  if (!realRoot || !realFile) return undefined;
+  const withinRoot = relative(realRoot, realFile);
+  if (withinRoot === "" || withinRoot.startsWith("..") || isAbsolute(withinRoot)) return undefined;
+
+  const current = await fileSystem.readFile(realFile).catch(() => undefined);
+  if (current === undefined || Buffer.byteLength(current, "utf8") > MAX_SOURCE_BYTES) return undefined;
+  return current;
+}
+
+/** Exact, non-overlapping occurrence offsets of a value inside content. */
+export function occurrenceOffsets(content: string, value: string): number[] {
+  const offsets: number[] = [];
+  for (let from = 0; (from = content.indexOf(value, from)) !== -1; from += value.length) offsets.push(from);
+  return offsets;
+}
+
+/**
  * Finds a single edit whose exact locator has 2–5 occurrences. This helper is
  * intentionally conservative: it never returns a request for malformed,
  * multi-edit, unreadable, oversized, or unsafely sanitized input.
@@ -39,19 +70,9 @@ export async function buildAmbiguousShadowRequest(
 
   const target = options.toolInput.path;
   if (typeof target !== "string") return undefined;
-  const fileSystem = options.fileSystem ?? nodeFileSystem;
 
-  // Symlink-safe containment: the file's real path must lie strictly inside
-  // the cwd's real path. Unreadable, escaping, or equal-to-root paths are
-  // never transmitted.
-  const realRoot = await fileSystem.realpath?.(resolve(options.cwd)).catch(() => undefined);
-  const realFile = await fileSystem.realpath?.(resolve(options.cwd, target)).catch(() => undefined);
-  if (!realRoot || !realFile) return undefined;
-  const withinRoot = relative(realRoot, realFile);
-  if (withinRoot === "" || withinRoot.startsWith("..") || isAbsolute(withinRoot)) return undefined;
-
-  const current = await fileSystem.readFile(realFile).catch(() => undefined);
-  if (current === undefined || Buffer.byteLength(current, "utf8") > MAX_SOURCE_BYTES) return undefined;
+  const current = await readContainedSource({ cwd: options.cwd, target, fileSystem: options.fileSystem });
+  if (current === undefined) return undefined;
 
   const offsets = occurrenceOffsets(current, parsed.oldText);
   if (offsets.length < 2 || offsets.length > MAX_CANDIDATES) return undefined;
@@ -85,12 +106,6 @@ function parseSingleEdit(value: Record<string, unknown>): { oldText: string; new
   const newText = (edit as Record<string, unknown>).newText;
   if (typeof oldText !== "string" || typeof newText !== "string" || oldText.length === 0) return undefined;
   return { oldText, newText };
-}
-
-function occurrenceOffsets(content: string, value: string): number[] {
-  const offsets: number[] = [];
-  for (let from = 0; (from = content.indexOf(value, from)) !== -1; from += value.length) offsets.push(from);
-  return offsets;
 }
 
 function candidateWindow(content: string, oldText: string, offset: number): string | undefined {

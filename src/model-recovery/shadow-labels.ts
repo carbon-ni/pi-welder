@@ -33,6 +33,8 @@ export interface ShadowRow {
   latencyMs: number;
   /** Reviewer aid: true only when the row linked to exactly one transcript edit call. */
   linked?: boolean;
+  /** Offline replay only (TASK-0024): historical ground-truth ordinal, never used by metrics. */
+  historicalTarget?: number;
   verifiedTarget?: string;
 }
 
@@ -63,16 +65,22 @@ export function sortRows(rows: readonly ShadowRow[]): ShadowRow[] {
     a.sessionId.localeCompare(b.sessionId) || a.ts.localeCompare(b.ts) || a.toolCallId.localeCompare(b.toolCallId));
 }
 
-function renderCell(row: ShadowRow, column: (typeof WORKSHEET_COLUMNS)[number]): string {
+function renderCell(row: ShadowRow, column: string): string {
   if (column === "verified-target") return row.verifiedTarget ?? "";
+  if (column === "historical-target") return row.historicalTarget === undefined ? "" : String(row.historicalTarget);
   if (column === "linked") return String(row.linked ?? false);
   const value = row[column as keyof ShadowRow];
   return value === undefined ? "" : String(value);
 }
 
+/** Generic cell renderer so replay worksheets can extend the column set. */
+export function renderRowCells(row: ShadowRow, columns: readonly string[]): string {
+  return columns.map((column) => renderCell(row, column)).join("\t");
+}
+
 export function buildWorksheet(rows: readonly ShadowRow[]): string {
   const header = WORKSHEET_COLUMNS.join("\t");
-  const body = sortRows(rows).map((row) => WORKSHEET_COLUMNS.map((column) => renderCell(row, column)).join("\t"));
+  const body = sortRows(rows).map((row) => renderRowCells(row, WORKSHEET_COLUMNS));
   return [header, ...body].join("\n") + "\n";
 }
 
@@ -98,6 +106,7 @@ export function parseWorksheet(text: string): ShadowRow[] {
       outcome: record.outcome ?? "",
       latencyMs: Number(record.latencyMs ?? 0),
       linked: record.linked === "true",
+      ...(record["historical-target"] ? { historicalTarget: Number(record["historical-target"]) } : {}),
       ...(record["verified-target"] ? { verifiedTarget: record["verified-target"] } : {}),
     } as ShadowRow;
   });
