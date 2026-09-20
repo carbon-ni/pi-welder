@@ -9,6 +9,7 @@ import {
   ROUTE_SENTINEL_PREFIX,
   clearBashRouteTokens,
   createBashRouteState,
+  invalidateBashRoutes,
   recognizeBashShapedCall,
   routeRefusalMessage,
   sentinelArguments,
@@ -96,7 +97,7 @@ test("prepareArguments replaces an exact bash shape with a sentinel and stores t
 
   const prepared = wrapper.prepareArguments!({ command: "ls -la", timeout: 10 }) as Record<string, unknown>;
   assert.deepEqual(prepared, { path: `${ROUTE_SENTINEL_PREFIX}tok-1`, content: "" });
-  assert.deepEqual(routeState.tokens.get("tok-1"), { sourceTool: "write", command: "ls -la", timeout: 10 });
+  assert.deepEqual(routeState.tokens.get("tok-1"), { sourceTool: "write", epoch: 0, command: "ls -la", timeout: 10 });
   assert.equal(JSON.stringify(prepared).includes("ls -la"), false, "the sentinel never carries the command");
 });
 
@@ -295,7 +296,7 @@ test("a sentinel-looking argument without a live token fails closed and never re
   assert.equal(builtinRuns, 0, "a sentinel never becomes a normal file operation");
 
   // A cleared store behaves the same.
-  routeState.tokens.set("tok", { sourceTool: "write", command: "echo hi" });
+  routeState.tokens.set("tok", { sourceTool: "write", epoch: 0, command: "echo hi" });
   clearBashRouteTokens(routeState);
   await assert.rejects(() => wrapper.execute("call-2", sentinelArguments("write", "tok"), undefined, undefined, trustedCtx()));
   assert.equal(builtinRuns, 0);
@@ -309,7 +310,7 @@ test("a token bound to another tool fails closed and never delegates", async () 
     resolveBuiltin: () => { throw new Error("the built-in must never run"); },
     nextToken: () => "tok",
   });
-  routeState.tokens.set("tok", { sourceTool: "write", command: "echo hi" });
+  routeState.tokens.set("tok", { sourceTool: "write", epoch: 0, command: "echo hi" });
 
   await assert.rejects(
     () => wrapper.execute("call-1", sentinelArguments("read", "tok"), undefined, undefined, trustedCtx()),
@@ -373,4 +374,92 @@ test("renderers treat original bash args as routed, so the command is never rend
   // A genuine write call still uses the built-in renderer.
   const normalCall = wrapper.renderCall!({ path: "a.ts", content: "x" }, {}, { cwd: "/work" })!;
   assert.deepEqual(normalCall.render(80), ["builtin call"]);
+});
+
+test("a policy epoch invalidates prepared tokens so off -> on cannot revive them", async () => {
+  const routeState = state();
+  let tokens = 0;
+  let calls = 0;
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("write"), toolName: "write", state: routeState,
+    delegate: async () => { calls++; return { content: [] }; },
+    resolveBuiltin: () => { throw new Error("the built-in must never run"); },
+    nextToken: () => `tok-${++tokens}`,
+  });
+
+  const prepared = wrapper.prepareArguments!({ command: "echo stale" });
+  const stored = routeState.tokens.get("tok-1")!;
+  assert.equal(stored.epoch, 0);
+
+  // off -> on leaves the settings tuple identical, only the epoch moves.
+  routeState.isEnabled = () => false;
+  invalidateBashRoutes(routeState);
+  routeState.isEnabled = () => true;
+  assert.equal(routeState.isEnabled(), true, "same eligibility as at preparation time");
+
+  await assert.rejects(
+    () => wrapper.execute("call-1", prepared, undefined, undefined, trustedCtx()),
+    /refused to route this write call/,
+  );
+  assert.equal(calls, 0, "a revived-looking token never executes");
+  assert.equal(routeState.tokens.size, 0, "the stale token is consumed");
+});
+
+test("the epoch guard alone refuses a token prepared under an older policy", async () => {
+  const routeState = state();
+  let tokens = 0;
+  let calls = 0;
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("write"), toolName: "write", state: routeState,
+    delegate: async () => { calls++; return { content: [] }; },
+    resolveBuiltin: () => { throw new Error("the built-in must never run"); },
+    nextToken: () => `tok-${++tokens}`,
+  });
+
+  const prepared = wrapper.prepareArguments!({ command: "echo stale" });
+  routeState.epoch++; // policy moved on; the token was not dropped
+
+  await assert.rejects(
+    () => wrapper.execute("call-1", prepared, undefined, undefined, trustedCtx()),
+    /token expired by a policy change/,
+  );
+  assert.equal(calls, 0);
+});
+
+test("every eligibility setter invalidates prepared tokens", async () => {
+  const { createRuntime, setBashRouteTrust, setCommandReroutingEnabled, setDisabledRepairs, setRepairsEnabled } = await import("../runtime.ts");
+
+  const transitions: Array<[string, (runtime: any) => void]> = [
+    ["master repairs off -> on", (runtime) => { setRepairsEnabled(runtime, false); setRepairsEnabled(runtime, true); }],
+    ["command rerouting off -> on", (runtime) => { setCommandReroutingEnabled(runtime, false); setCommandReroutingEnabled(runtime, true); }],
+    ["route-to-bash disabled -> enabled", (runtime) => { setDisabledRepairs(runtime, ["route-to-bash"]); setDisabledRepairs(runtime, []); }],
+    ["trust revoked -> restored", (runtime) => { setBashRouteTrust(runtime, false); setBashRouteTrust(runtime, true); }],
+  ];
+
+  for (const [label, transition] of transitions) {
+    const runtime = createRuntime({ commandReroutingEnabled: true });
+    setBashRouteTrust(runtime, true);
+    let tokens = 0;
+    let calls = 0;
+    const wrapper = wrapToolForBashRouting({
+      builtin: builtinStub("write"), toolName: "write", state: runtime.bashRouteState,
+      delegate: async () => { calls++; return { content: [] }; },
+      resolveBuiltin: () => { throw new Error("the built-in must never run"); },
+      nextToken: () => `tok-${++tokens}`,
+    });
+
+    const prepared = wrapper.prepareArguments!({ command: "echo stale" });
+    assert.equal(runtime.bashRouteState.tokens.size, 1, label);
+    assert.equal(runtime.bashRouteState.isEnabled(), true, `${label}: eligible before the transition`);
+
+    transition(runtime);
+
+    assert.equal(runtime.bashRouteState.isEnabled(), true, `${label}: eligible again after the transition`);
+    await assert.rejects(
+      () => wrapper.execute("call-1", prepared, undefined, undefined, { cwd: "/work", isProjectTrusted: () => runtime.bashRouteState.isTrusted() }),
+      /refused to route/,
+      label,
+    );
+    assert.equal(calls, 0, `${label}: zero execution`);
+  }
 });

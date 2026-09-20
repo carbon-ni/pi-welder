@@ -24,6 +24,8 @@ export type RouteToolName = "read" | "write" | "edit";
 export interface StoredRouteCommand {
   /** The wrapper that prepared this token; a mismatch fails closed. */
   sourceTool: RouteToolName;
+  /** Policy epoch at preparation time; a bump makes the token unrouteable. */
+  epoch: number;
   command: string;
   timeout?: number;
 }
@@ -44,6 +46,12 @@ export interface BashRouteState {
   /** Project trust known before execute (execute re-checks ctx as well). */
   isTrusted: () => boolean;
   tokens: Map<string, StoredRouteCommand>;
+  /**
+   * Monotonic policy epoch. Every transition that can change eligibility bumps
+   * it and drops prepared tokens, so off -> on cannot revive a stale token even
+   * though the resulting settings tuple is identical.
+   */
+  epoch: number;
 }
 
 export function createBashRouteState(options: { isEnabled?: () => boolean; isTrusted?: () => boolean } = {}): BashRouteState {
@@ -51,10 +59,21 @@ export function createBashRouteState(options: { isEnabled?: () => boolean; isTru
     isEnabled: options.isEnabled ?? (() => false),
     isTrusted: options.isTrusted ?? (() => false),
     tokens: new Map(),
+    epoch: 0,
   };
 }
 
 export function clearBashRouteTokens(state: BashRouteState): void {
+  state.tokens.clear();
+}
+
+/**
+ * Invalidates every prepared route: bumps the epoch and drops the tokens. Call
+ * this on every policy transition (master repairs switch, command-rerouting
+ * setting, `route-to-bash` disabled, trust change, session reset).
+ */
+export function invalidateBashRoutes(state: BashRouteState): void {
+  state.epoch++;
   state.tokens.clear();
 }
 
@@ -181,7 +200,7 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
       // Oversized commands stay native: no token, no routing.
       if (commandBytes(call.command) > MAX_COMMAND_BYTES) return prepared;
       const token = nextToken();
-      rememberToken(state, token, { sourceTool: toolName, command: call.command, ...(call.timeout === undefined ? {} : { timeout: call.timeout }) });
+      rememberToken(state, token, { sourceTool: toolName, epoch: state.epoch, command: call.command, ...(call.timeout === undefined ? {} : { timeout: call.timeout }) });
       return sentinelArguments(toolName, token);
     },
 
@@ -194,6 +213,7 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
         if (stored !== undefined) state.tokens.delete(token); // one use, always
         if (!state.isEnabled()) throwRouteRefusal(toolName, "routing disabled");
         if (stored === undefined) throwRouteRefusal(toolName, "unknown or expired token");
+        if (stored.epoch !== state.epoch) throwRouteRefusal(toolName, "token expired by a policy change");
         if (stored.sourceTool !== toolName) throwRouteRefusal(toolName, "token belongs to another tool");
         if (ctx?.isProjectTrusted?.() !== true) throwRouteRefusal(toolName, "untrusted project");
         onRouted?.({ sourceTool: toolName, targetTool: "bash", toolCallId }, ctx);

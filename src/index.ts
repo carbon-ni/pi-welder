@@ -33,7 +33,7 @@ import {
   handleToolCall,
   handleToolResult,
 } from "./handlers.ts";
-import { createRuntime } from "./runtime.ts";
+import { createRuntime, setBashRouteTrust } from "./runtime.ts";
 import { createTypeSafeJevClient } from "./infra/typesafe.ts";
 import { READ_PATH_PROMPT } from "./read-recovery/path-repair.ts";
 
@@ -100,7 +100,7 @@ export default function (pi: ExtensionHost) {
 
   pi.on("session_start", async (_event, ctx) => {
     // Trust gates the pre-validation sentinel; execute re-checks ctx as well.
-    runtime.bashRouteState.isTrusted = () => ctx.isProjectTrusted?.() === true;
+    setBashRouteTrust(runtime, ctx.isProjectTrusted?.() === true);
     await handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION);
   });
 

@@ -11,6 +11,7 @@ export {
   ROUTE_SENTINEL_PREFIX,
   clearBashRouteTokens,
   createBashRouteState,
+  invalidateBashRoutes,
   isRoutedRenderArgs,
   routeRefusalMessage,
   sentinelArguments,

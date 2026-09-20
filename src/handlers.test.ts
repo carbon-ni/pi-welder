@@ -795,7 +795,7 @@ test("handleToolCall leaves a routed sentinel untouched and handleToolResult pas
 
 test("session shutdown clears the bash route token state", async () => {
   const runtime = createRuntime({ commandReroutingEnabled: true });
-  runtime.bashRouteState.tokens.set("tok", { sourceTool: "write", command: "echo hi" });
+  runtime.bashRouteState.tokens.set("tok", { sourceTool: "write", epoch: 0, command: "echo hi" });
 
   await handleSessionShutdown(runtime, ctx());
 

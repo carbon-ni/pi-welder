@@ -6,7 +6,7 @@ import { createJevShadow, type JevShadow, type ShadowEvidence } from "./model-re
 import { createReadPathState, type ReadPathState } from "./read-recovery/state.ts";
 import { READ_PATH_EVIDENCE } from "./read-recovery/evidence-gate.ts";
 import type { JevClient } from "./infra/typesafe.ts";
-import { clearBashRouteTokens, createBashRouteState, type BashRouteState } from "./command-routing/wrapper.ts";
+import { clearBashRouteTokens, createBashRouteState, invalidateBashRoutes, type BashRouteState } from "./command-routing/wrapper.ts";
 
 export interface WelderRuntime {
   stats: Stats;
@@ -88,8 +88,38 @@ export function resetSessionState(runtime: WelderRuntime): void {
   runtime.episodes = createEpisodeTracker();
   runtime.shadowEvidence = [];
   runtime.readPathState = createReadPathState();
-  clearBashRouteTokens(runtime.bashRouteState);
+  invalidateBashRoutes(runtime.bashRouteState);
   resetJevShadow(runtime);
+}
+
+/**
+ * Every mutation that can change bash-route eligibility goes through one of
+ * these setters. Each invalidation bumps the policy epoch, so a token prepared
+ * before a transition cannot be revived by an off -> on cycle.
+ */
+export function setRepairsEnabled(runtime: WelderRuntime, enabled: boolean): void {
+  if (runtime.enabled === enabled) return;
+  runtime.enabled = enabled;
+  invalidateBashRoutes(runtime.bashRouteState);
+}
+
+export function setCommandReroutingEnabled(runtime: WelderRuntime, enabled: boolean): void {
+  if (runtime.commandReroutingEnabled === enabled) return;
+  runtime.commandReroutingEnabled = enabled;
+  invalidateBashRoutes(runtime.bashRouteState);
+}
+
+export function setDisabledRepairs(runtime: WelderRuntime, names: Iterable<string>): void {
+  const next = new Set(names);
+  const routeChanged = next.has("route-to-bash") !== runtime.disabledRepairs.has("route-to-bash");
+  runtime.disabledRepairs = next;
+  if (routeChanged) invalidateBashRoutes(runtime.bashRouteState);
+}
+
+export function setBashRouteTrust(runtime: WelderRuntime, trusted: boolean): void {
+  const previous = runtime.bashRouteState.isTrusted();
+  runtime.bashRouteState.isTrusted = () => trusted;
+  if (previous !== trusted) invalidateBashRoutes(runtime.bashRouteState);
 }
 
 export function setSourceShadowingEnabled(runtime: WelderRuntime, enabled: boolean): void {

@@ -6,6 +6,7 @@ import { loadWelderConfig, saveWelderConfig } from "./config.ts";
 import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { openWelderSettings } from "./infra/pi/settings-ui.ts";
 import type { WelderConfig } from "./config.ts";
+import { setCommandReroutingEnabled, setDisabledRepairs, setRepairsEnabled } from "./runtime.ts";
 import {
   clearRecovery,
   recoveryFailuresSummary,
@@ -115,9 +116,9 @@ export function mineSummary(result: MineResult): string {
  */
 export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): void {
   runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
-  runtime.enabled = current.repairsEnabled;
-  runtime.disabledRepairs = new Set(current.disabledRepairs);
-  runtime.commandReroutingEnabled = current.commandReroutingEnabled;
+  setRepairsEnabled(runtime, current.repairsEnabled);
+  setDisabledRepairs(runtime, current.disabledRepairs);
+  setCommandReroutingEnabled(runtime, current.commandReroutingEnabled);
   setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
   try {
     setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);
