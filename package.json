@@ -11,7 +11,8 @@
     "eval:direction": "node --experimental-strip-types scripts/direction-evals.ts report",
     "eval:tune": "node --experimental-strip-types scripts/jev-tune.ts probe",
     "shadow:stats": "node --experimental-strip-types scripts/shadow-stats.ts stats",
-    "eval:read-path": "node --experimental-strip-types scripts/read-path-eval.ts pairs"
+    "eval:read-path": "node --experimental-strip-types scripts/read-path-eval.ts pairs",
+    "eval:routing": "node --experimental-strip-types scripts/routing-eval.ts run"
   },
   "pi": {
     "extensions": ["./src/index.ts"]
