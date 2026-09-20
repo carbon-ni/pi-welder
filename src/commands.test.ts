@@ -175,3 +175,33 @@ test("loadMineEvents all source merges both, tolerates load failure", async () =
   assert.equal(events.length, 1);
   assert.equal(events[0]!.toolName, "read");
 });
+
+test("syncRuntimeConfig applies the live bash-routing gate without a restart", async () => {
+  const { createRuntime } = await import("./runtime.ts");
+  const { syncRuntimeConfig } = await import("./commands.ts");
+  const runtime = createRuntime({});
+
+  const base = {
+    modelRepairReportingEnabled: false,
+    recoveryGuidanceLimit: 3,
+    repairsEnabled: true,
+    disabledRepairs: [] as string[],
+    sourceShadowingEnabled: false,
+    readPathRepairEnabled: false,
+  };
+
+  assert.equal(runtime.bashRouteState.isEnabled(), false, "off by default");
+
+  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true });
+  assert.equal(runtime.commandReroutingEnabled, true, "toggled live");
+  assert.equal(runtime.bashRouteState.isEnabled(), true);
+
+  syncRuntimeConfig(runtime, { ...base, repairsEnabled: false, commandReroutingEnabled: true });
+  assert.equal(runtime.bashRouteState.isEnabled(), false, "master repairs switch gates routing");
+
+  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true, disabledRepairs: ["route-to-bash"] });
+  assert.equal(runtime.bashRouteState.isEnabled(), false, "disabling the route-to-bash repair gates routing");
+
+  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true });
+  assert.equal(runtime.bashRouteState.isEnabled(), true, "re-enabling restores routing");
+});

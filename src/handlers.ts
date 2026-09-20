@@ -90,8 +90,11 @@ export async function handleToolCall(
 
   // TASK-0034: the bash-routing wrapper replaces an exact bash-shaped call with
   // a schema-valid sentinel before this event fires. Welder repairs must never
-  // touch a sentinel, and the routed result must pass through unchanged.
-  if (sentinelTokenOf(input) !== undefined) return undefined;
+  // touch a sentinel, but episode bookkeeping still runs.
+  if (sentinelTokenOf(input) !== undefined) {
+    runtime.episodes.observeCall({ toolName: event.toolName, actions: ["route-to-bash"] });
+    return undefined;
+  }
 
   // Read-shaped edit: recognized on the ORIGINAL input (repairArgs could add
   // defaults), blocked before execution, and answered with the exact read call.
@@ -251,8 +254,16 @@ export async function handleToolResult(
   event: ToolResultEvent,
   ctx: WelderContext,
 ): Promise<ResultRepairPatch | undefined> {
-  // TASK-0034: a routed call's real bash result passes through untouched.
-  if (sentinelTokenOf(event.input) !== undefined) return undefined;
+  // TASK-0034: a routed call's real bash result passes through untouched, but
+  // episode correlation, recovery accounting, and failure recording still run.
+  if (sentinelTokenOf(event.input) !== undefined) {
+    const closedRouteRecords = runtime.episodes.observeResult({ toolName: event.toolName, isError: event.isError === true });
+    await appendEpisodeRecords(closedRouteRecords, ctx).catch(() => { /* logging never breaks results */ });
+    recordToolResult(runtime.recovery, event);
+    const routeError = extractToolErrorText(event);
+    if (routeError) await recordFailedToolResult(runtime, event, routeError, ctx);
+    return undefined;
+  }
 
   // Correlate this result with episodes opened before the call was made.
   const closedRecords = runtime.episodes.observeResult({ toolName: event.toolName, isError: event.isError === true });

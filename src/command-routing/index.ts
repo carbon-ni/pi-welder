@@ -5,12 +5,16 @@ export {
   type BashShapedCall,
 } from "./gate.ts";
 export {
+  MAX_COMMAND_BYTES,
   MAX_ROUTE_TOKENS,
+  MAX_TOTAL_COMMAND_BYTES,
   ROUTE_SENTINEL_PREFIX,
   clearBashRouteTokens,
   createBashRouteState,
-  refusedResult,
+  isRoutedRenderArgs,
+  routeRefusalMessage,
   sentinelArguments,
+  throwRouteRefusal,
   sentinelTokenOf,
   wrapToolForBashRouting,
   type BashDelegate,

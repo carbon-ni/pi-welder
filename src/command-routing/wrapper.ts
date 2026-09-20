@@ -14,14 +14,28 @@
 import { recognizeBashShapedCall } from "./gate.ts";
 
 export const ROUTE_SENTINEL_PREFIX = "pi-welder-route:";
-/** Bounded: a stale token must never accumulate or leak across sessions. */
+/** Bounded count, total payload, and per-command payload. */
 export const MAX_ROUTE_TOKENS = 32;
+export const MAX_COMMAND_BYTES = 8_192;
+export const MAX_TOTAL_COMMAND_BYTES = 32_768;
 
 export type RouteToolName = "read" | "write" | "edit";
 
 export interface StoredRouteCommand {
+  /** The wrapper that prepared this token; a mismatch fails closed. */
+  sourceTool: RouteToolName;
   command: string;
   timeout?: number;
+}
+
+function commandBytes(command: string): number {
+  return Buffer.byteLength(command, "utf8");
+}
+
+function totalCommandBytes(tokens: Map<string, StoredRouteCommand>): number {
+  let total = 0;
+  for (const stored of tokens.values()) total += commandBytes(stored.command);
+  return total;
 }
 
 export interface BashRouteState {
@@ -44,11 +58,16 @@ export function clearBashRouteTokens(state: BashRouteState): void {
   state.tokens.clear();
 }
 
+/**
+ * Stores a token under both bounds. Eviction is safe: an evicted token can no
+ * longer be presented (that path fails closed), so it can never be routed.
+ */
 function rememberToken(state: BashRouteState, token: string, command: StoredRouteCommand): void {
   state.tokens.set(token, command);
-  while (state.tokens.size > MAX_ROUTE_TOKENS) {
+  while (state.tokens.size > MAX_ROUTE_TOKENS || totalCommandBytes(state.tokens) > MAX_TOTAL_COMMAND_BYTES) {
     const oldest = state.tokens.keys().next();
     if (oldest.done === true) break;
+    if (oldest.value === token) break; // never evict the token just stored
     state.tokens.delete(oldest.value);
   }
 }
@@ -159,18 +178,24 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
       if (!state.isEnabled() || !state.isTrusted()) return prepared;
       const call = recognizeBashShapedCall(toolName, args);
       if (!call) return prepared;
+      // Oversized commands stay native: no token, no routing.
+      if (commandBytes(call.command) > MAX_COMMAND_BYTES) return prepared;
       const token = nextToken();
-      rememberToken(state, token, { command: call.command, ...(call.timeout === undefined ? {} : { timeout: call.timeout }) });
+      rememberToken(state, token, { sourceTool: toolName, command: call.command, ...(call.timeout === undefined ? {} : { timeout: call.timeout }) });
       return sentinelArguments(toolName, token);
     },
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const token = sentinelTokenOf(params);
-      const stored = token === undefined ? undefined : state.tokens.get(token);
-      if (stored !== undefined && token !== undefined) {
-        // One use only: consume before doing anything observable.
-        state.tokens.delete(token);
-        if (ctx?.isProjectTrusted?.() !== true) return refusedResult(toolName);
+      if (token !== undefined) {
+        // A sentinel-looking call is never a normal call: it either routes or
+        // fails closed. It must never reach read/write/edit.
+        const stored = state.tokens.get(token);
+        if (stored !== undefined) state.tokens.delete(token); // one use, always
+        if (!state.isEnabled()) throwRouteRefusal(toolName, "routing disabled");
+        if (stored === undefined) throwRouteRefusal(toolName, "unknown or expired token");
+        if (stored.sourceTool !== toolName) throwRouteRefusal(toolName, "token belongs to another tool");
+        if (ctx?.isProjectTrusted?.() !== true) throwRouteRefusal(toolName, "untrusted project");
         onRouted?.({ sourceTool: toolName, targetTool: "bash", toolCallId }, ctx);
         try {
           const result = await delegate({
@@ -182,28 +207,28 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
           });
           return {
             content: result.content,
-            details: result.details ?? {},
+            ...(result.details === undefined ? {} : { details: result.details }),
             ...(result.isError === true ? { isError: true } : {}),
           };
         } catch (error) {
-          // Never claim success when the bash capability fails.
+          // Pi derives isError from a throw: never claim success on failure.
           options.onDelegateError?.(error);
           const message = error instanceof Error ? error.message : String(error);
-          return { content: [{ type: "text", text: `pi-welder: bash execution failed. ${message}` }], details: {}, isError: true };
+          throw new Error(`pi-welder: bash execution failed. ${message}`);
         }
       }
-      // Unknown or absent token: normal call, delegate to the built-in for cwd.
+      // Normal call: no sentinel anywhere, so delegate to the built-in for cwd.
       return resolveBuiltin(typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd()).execute(toolCallId, params, signal, onUpdate, ctx);
     },
 
     renderCall: (args, theme, context) => {
-      if (sentinelTokenOf(args) !== undefined) return noticeComponent([`bash (routed ${toolName}) — command hidden`]);
+      if (isRoutedRenderArgs(args)) return noticeComponent([`bash (routed ${toolName}) — command hidden`]);
       const resolved = resolveBuiltin(context?.cwd ?? process.cwd());
       return resolved.renderCall?.(args, theme, context) ?? noticeComponent([toolName]);
     },
 
     renderResult: (result, renderOptions, theme, context) => {
-      if (sentinelTokenOf(context?.args) !== undefined) {
+      if (isRoutedRenderArgs(context?.args)) {
         const status = context?.isError === true || result?.isError === true ? "failed" : "completed";
         const preview = textOf(result).split("\n").slice(0, 5);
         return noticeComponent([`bash (routed ${toolName}) — ${status}`, ...preview]);
@@ -214,11 +239,28 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
   };
 }
 
-/** Refused routed call: no execution, no command, and never a success claim. */
-export function refusedResult(toolName: RouteToolName): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: true } {
-  return {
-    content: [{ type: "text", text: `pi-welder: refused to execute this ${toolName} call because the project is not trusted.` }],
-    details: {},
-    isError: true,
-  };
+/**
+ * Routed-call rendering predicate. Pi's renderers can receive the ORIGINAL
+ * assistant arguments instead of the prepared sentinel, so a missing `command`
+ * string also counts as routed. A legitimate read/write/edit call never has a
+ * `command` key (the strict schemas forbid it).
+ */
+export function isRoutedRenderArgs(args: unknown): boolean {
+  if (sentinelTokenOf(args) !== undefined) return true;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+  return typeof (args as { command?: unknown }).command === "string";
+}
+
+/** Bounded refusal message; never contains a command. */
+export function routeRefusalMessage(toolName: RouteToolName, reason = "refused"): string {
+  return `pi-welder: refused to route this ${toolName} call (${reason}); the original call was not executed.`;
+}
+
+/**
+ * Fails a routed call closed. Throwing is the host contract for a failed tool:
+ * Pi turns a thrown execute error into an error tool result, so the call can
+ * never be mistaken for a success and never reaches read/write/edit.
+ */
+export function throwRouteRefusal(toolName: RouteToolName, reason = "refused"): never {
+  throw new Error(routeRefusalMessage(toolName, reason));
 }

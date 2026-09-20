@@ -795,9 +795,26 @@ test("handleToolCall leaves a routed sentinel untouched and handleToolResult pas
 
 test("session shutdown clears the bash route token state", async () => {
   const runtime = createRuntime({ commandReroutingEnabled: true });
-  runtime.bashRouteState.tokens.set("tok", { command: "echo hi" });
+  runtime.bashRouteState.tokens.set("tok", { sourceTool: "write", command: "echo hi" });
 
   await handleSessionShutdown(runtime, ctx());
 
   assert.equal(runtime.bashRouteState.tokens.size, 0);
+});
+
+test("a routed sentinel result still closes episode bookkeeping and records failures", async () => {
+  const runtime = createRuntime({ commandReroutingEnabled: true });
+  const sentinel = { path: "pi-welder-route:opaque-token-1", content: "" };
+
+  await handleToolCall(runtime, { toolName: "write", toolCallId: "route-acc-1", input: { ...sentinel } } as any, ctx());
+
+  const result = await handleToolResult(
+    runtime,
+    { toolName: "write", toolCallId: "route-acc-1", input: { ...sentinel }, isError: true, content: [{ type: "text", text: "Command exited with code 3" }] } as any,
+    ctx(),
+  );
+
+  assert.equal(result, undefined, "no result patch for a routed call");
+  assert.equal(runtime.stats.failedToolResults, 1, "the routed failure is recorded through normal accounting");
+  assert.equal(runtime.stats.repairsByAction.get("route-to-bash"), undefined, "no repair rewriting on the routed result");
 });

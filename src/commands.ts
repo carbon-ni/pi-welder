@@ -5,6 +5,7 @@ import { logDir, sessionId } from "./infra/pi/context.ts";
 import { loadWelderConfig, saveWelderConfig } from "./config.ts";
 import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { openWelderSettings } from "./infra/pi/settings-ui.ts";
+import type { WelderConfig } from "./config.ts";
 import {
   clearRecovery,
   recoveryFailuresSummary,
@@ -108,6 +109,23 @@ export function mineSummary(result: MineResult): string {
   ].join("\n");
 }
 
+/**
+ * Applies a loaded config to the live runtime. Every toggle takes effect without
+ * a restart, and the bash-routing gate reads these fields live.
+ */
+export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): void {
+  runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
+  runtime.enabled = current.repairsEnabled;
+  runtime.disabledRepairs = new Set(current.disabledRepairs);
+  runtime.commandReroutingEnabled = current.commandReroutingEnabled;
+  setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
+  try {
+    setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);
+  } catch {
+    /* config is parsed to a valid 1-10 integer */
+  }
+}
+
 export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] {
   return [
     {
@@ -168,16 +186,8 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
         const items = welderSettingItems(current);
         await openWelderSettings(ctx, items, (id, value) => {
           current = applyWelderSetting(current, id, value);
-          runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
-          runtime.enabled = current.repairsEnabled;
-          runtime.disabledRepairs = new Set(current.disabledRepairs);
-          setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
+          syncRuntimeConfig(runtime, current);
           ctx.ui.setStatus("welder", welderStatusText(runtime));
-          try {
-            setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);
-          } catch {
-            /* config is parsed to a valid 1-10 integer */
-          }
           try {
             saveWelderConfig(current);
           } catch {

@@ -66,7 +66,9 @@ export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
     sourceShadowingEnabled: options.sourceShadowingEnabled ?? false,
     readPathRepairEnabled: options.readPathRepairEnabled ?? false,
     commandReroutingEnabled: options.commandReroutingEnabled ?? false,
-    bashRouteState: createBashRouteState({ isEnabled: () => runtime.commandReroutingEnabled }),
+    bashRouteState: createBashRouteState({
+      isEnabled: () => runtime.enabled && runtime.commandReroutingEnabled && !runtime.disabledRepairs.has("route-to-bash"),
+    }),
     readPathMutationEnabled: options.readPathMutationEnabled ?? READ_PATH_EVIDENCE.passed,
     readPathState: createReadPathState(),
     jevClient: options.jevClient,

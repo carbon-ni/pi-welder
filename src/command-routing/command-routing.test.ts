@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   BASH_TIMEOUT_MAX_SECONDS,
+  MAX_COMMAND_BYTES,
   MAX_ROUTE_TOKENS,
+  MAX_TOTAL_COMMAND_BYTES,
   ROUTE_SENTINEL_PREFIX,
   clearBashRouteTokens,
   createBashRouteState,
   recognizeBashShapedCall,
-  refusedResult,
+  routeRefusalMessage,
   sentinelArguments,
   sentinelTokenOf,
   wrapToolForBashRouting,
@@ -94,7 +96,7 @@ test("prepareArguments replaces an exact bash shape with a sentinel and stores t
 
   const prepared = wrapper.prepareArguments!({ command: "ls -la", timeout: 10 }) as Record<string, unknown>;
   assert.deepEqual(prepared, { path: `${ROUTE_SENTINEL_PREFIX}tok-1`, content: "" });
-  assert.deepEqual(routeState.tokens.get("tok-1"), { command: "ls -la", timeout: 10 });
+  assert.deepEqual(routeState.tokens.get("tok-1"), { sourceTool: "write", command: "ls -la", timeout: 10 });
   assert.equal(JSON.stringify(prepared).includes("ls -la"), false, "the sentinel never carries the command");
 });
 
@@ -150,14 +152,15 @@ test("execute consumes the token once and refuses an untrusted context", async (
   const wrapper = wrapToolForBashRouting({
     builtin: builtinStub("read"), toolName: "read", state: routeState,
     delegate: async () => { calls++; return { content: [{ type: "text", text: "ran" }] }; },
-    resolveBuiltin: () => builtinStub("read"),
+    resolveBuiltin: () => { throw new Error("the built-in must never run for a sentinel"); },
     nextToken: () => `tok-${++tokens}`,
   });
 
   const refusedSentinel = wrapper.prepareArguments!({ command: "echo hi" });
-  const refused = await wrapper.execute("call-1", refusedSentinel, undefined, undefined, { cwd: "/work", isProjectTrusted: () => false });
-  assert.equal(refused.isError, true);
-  assert.match(refused.content[0]!.text, /not trusted/);
+  await assert.rejects(
+    () => wrapper.execute("call-1", refusedSentinel, undefined, undefined, { cwd: "/work", isProjectTrusted: () => false }),
+    /untrusted project/,
+  );
   assert.equal(calls, 0, "no execution for an untrusted context");
   assert.equal(routeState.tokens.size, 0, "the token is still consumed");
 
@@ -165,9 +168,11 @@ test("execute consumes the token once and refuses an untrusted context", async (
   const first = await wrapper.execute("call-2", trustedSentinel, undefined, undefined, trustedCtx());
   assert.equal(first.isError, undefined);
   assert.equal(calls, 1);
-  const second = await wrapper.execute("call-2", trustedSentinel, undefined, undefined, trustedCtx());
+  await assert.rejects(
+    () => wrapper.execute("call-2", trustedSentinel, undefined, undefined, trustedCtx()),
+    /unknown or expired token/,
+  );
   assert.equal(calls, 1, "a consumed token never executes twice");
-  assert.equal(second.content[0].text, "builtin ran", "a reused token falls back to the built-in behavior");
 });
 
 test("normal calls delegate to the built-in definition for the current cwd", async () => {
@@ -198,10 +203,10 @@ test("a delegate failure is reported as an error, never as success", async () =>
   });
 
   const prepared = wrapper.prepareArguments!({ command: "nope" });
-  const result = await wrapper.execute("call-1", prepared, undefined, undefined, trustedCtx());
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /bash execution failed/);
-  assert.match(result.content[0].text, /spawn failed/);
+  await assert.rejects(
+    () => wrapper.execute("call-1", prepared, undefined, undefined, trustedCtx()),
+    /bash execution failed.*spawn failed/s,
+  );
 });
 
 test("the routed audit signal carries source and target tool names only", async () => {
@@ -259,9 +264,113 @@ test("sentinels render as a safe notice and normal calls keep the built-in rende
   assert.deepEqual(normalResult.render(80), ["builtin result"]);
 });
 
-test("the refused result never claims success and never contains a command", () => {
-  const refused = refusedResult("read");
-  assert.equal(refused.isError, true);
-  assert.match(refused.content[0]!.text, /not trusted/);
-  assert.deepEqual(refused.details, {});
+test("the refusal message is bounded, names the reason, and never contains a command", () => {
+  const message = routeRefusalMessage("read", "unknown or expired token");
+  assert.match(message, /refused to route this read call/);
+  assert.match(message, /unknown or expired token/);
+  assert.match(message, /original call was not executed/);
+});
+
+test("a sentinel-looking argument without a live token fails closed and never reaches the built-in", async () => {
+  let builtinRuns = 0;
+  const routeState = state();
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("write"), toolName: "write", state: routeState,
+    delegate: async () => { throw new Error("bash must not run"); },
+    resolveBuiltin: () => ({ ...builtinStub("write"), execute: async () => { builtinRuns++; return { content: [] }; } }),
+    nextToken: () => "tok",
+  });
+
+  // Unknown token, evicted-looking token, and a bare sentinel path must all refuse.
+  for (const params of [
+    sentinelArguments("write", "unknown"),
+    sentinelArguments("write", "evicted"),
+  ]) {
+    await assert.rejects(
+      () => wrapper.execute("call-1", params, undefined, undefined, trustedCtx()),
+      /refused to route this write call/,
+      JSON.stringify(params),
+    );
+  }
+  assert.equal(builtinRuns, 0, "a sentinel never becomes a normal file operation");
+
+  // A cleared store behaves the same.
+  routeState.tokens.set("tok", { sourceTool: "write", command: "echo hi" });
+  clearBashRouteTokens(routeState);
+  await assert.rejects(() => wrapper.execute("call-2", sentinelArguments("write", "tok"), undefined, undefined, trustedCtx()));
+  assert.equal(builtinRuns, 0);
+});
+
+test("a token bound to another tool fails closed and never delegates", async () => {
+  const routeState = state();
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("read"), toolName: "read", state: routeState,
+    delegate: async () => { throw new Error("bash must not run"); },
+    resolveBuiltin: () => { throw new Error("the built-in must never run"); },
+    nextToken: () => "tok",
+  });
+  routeState.tokens.set("tok", { sourceTool: "write", command: "echo hi" });
+
+  await assert.rejects(
+    () => wrapper.execute("call-1", sentinelArguments("read", "tok"), undefined, undefined, trustedCtx()),
+    /token belongs to another tool/,
+  );
+  assert.equal(routeState.tokens.size, 0, "the mismatched token is consumed");
+});
+
+test("execute re-checks the live gate and refuses after routing is disabled", async () => {
+  const routeState = state();
+  let tokens = 0;
+  let calls = 0;
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("write"), toolName: "write", state: routeState,
+    delegate: async () => { calls++; return { content: [] }; },
+    resolveBuiltin: () => { throw new Error("the built-in must never run"); },
+    nextToken: () => `tok-${++tokens}`,
+  });
+  const prepared = wrapper.prepareArguments!({ command: "echo hi" });
+  assert.equal(routeState.tokens.size, 1);
+
+  routeState.isEnabled = () => false;
+  await assert.rejects(() => wrapper.execute("call-1", prepared, undefined, undefined, trustedCtx()), /routing disabled/);
+  assert.equal(calls, 0);
+  assert.equal(routeState.tokens.size, 0, "consumed even when refused");
+});
+
+test("oversized commands stay native and command bytes are capped in the store", () => {
+  const routeState = state();
+  let tokens = 0;
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("write"), toolName: "write", state: routeState,
+    delegate: async () => ({ content: [] }), resolveBuiltin: () => builtinStub("write"),
+    nextToken: () => `tok-${++tokens}`,
+  });
+
+  const oversized = { command: "x".repeat(MAX_COMMAND_BYTES + 1) };
+  assert.deepEqual(wrapper.prepareArguments!(oversized), oversized, "oversized commands are never stored");
+  assert.equal(routeState.tokens.size, 0);
+
+  const big = `echo ${"y".repeat(4_000)}`;
+  for (let index = 0; index < 20; index++) wrapper.prepareArguments!({ command: big });
+  let total = 0;
+  for (const stored of routeState.tokens.values()) total += Buffer.byteLength(stored.command, "utf8");
+  assert.equal(total <= MAX_TOTAL_COMMAND_BYTES, true, `total bytes bounded, got ${total}`);
+});
+
+test("renderers treat original bash args as routed, so the command is never rendered", () => {
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("write"), toolName: "write", state: state(),
+    delegate: async () => ({ content: [] }), resolveBuiltin: () => builtinStub("write"), nextToken: () => "tok",
+  });
+
+  // Pi may hand the ORIGINAL assistant arguments to the renderer.
+  const originalCall = wrapper.renderCall!({ command: "echo SECRET", timeout: 5 }, {}, { cwd: "/work" })!;
+  assert.equal(originalCall.render(80).join(" ").includes("SECRET"), false, "the command is never rendered");
+
+  const originalResult = wrapper.renderResult!({ content: [{ type: "text", text: "out" }] }, {}, {}, { cwd: "/work", args: { command: "echo SECRET", timeout: 5 }, isError: false })!;
+  assert.equal(originalResult.render(80).join(" ").includes("SECRET"), false);
+
+  // A genuine write call still uses the built-in renderer.
+  const normalCall = wrapper.renderCall!({ path: "a.ts", content: "x" }, {}, { cwd: "/work" })!;
+  assert.deepEqual(normalCall.render(80), ["builtin call"]);
 });
