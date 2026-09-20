@@ -7,6 +7,7 @@ import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { openWelderSettings } from "./infra/pi/settings-ui.ts";
 import type { WelderConfig } from "./config.ts";
 import { setCommandReroutingEnabled, setDisabledRepairs, setRepairsEnabled } from "./runtime.ts";
+import type { LabelRecord } from "./prospective-labels/collector.ts";
 import {
   clearRecovery,
   recoveryFailuresSummary,
@@ -125,14 +126,15 @@ export function prospectiveLabelSummary(runtime: WelderRuntime): string | undefi
  * Applies a loaded config to the live runtime. Every toggle takes effect without
  * a restart, and the bash-routing gate reads these fields live.
  */
-export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): void {
+export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): LabelRecord[] {
   runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
   setRepairsEnabled(runtime, current.repairsEnabled);
   setDisabledRepairs(runtime, current.disabledRepairs);
   setCommandReroutingEnabled(runtime, current.commandReroutingEnabled);
+  const closures: LabelRecord[] = [];
   if (runtime.prospectiveLabelsEnabled !== current.prospectiveLabelsEnabled) {
-    // Disabling persists what is pending, then stops collecting.
-    for (const record of runtime.prospectiveLabels?.closeUnresolved("expired") ?? []) runtime.onProspectiveLabel?.(record);
+    // Disabling closes what is pending; the caller persists exactly once.
+    closures.push(...(runtime.prospectiveLabels?.closeUnresolved("expired") ?? []));
     runtime.prospectiveLabelsEnabled = current.prospectiveLabelsEnabled;
   }
   setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
@@ -141,6 +143,7 @@ export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig)
   } catch {
     /* config is parsed to a valid 1-10 integer */
   }
+  return closures;
 }
 
 export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] {
@@ -206,7 +209,9 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
         const items = welderSettingItems(current);
         await openWelderSettings(ctx, items, (id, value) => {
           current = applyWelderSetting(current, id, value);
-          syncRuntimeConfig(runtime, current);
+          for (const record of syncRuntimeConfig(runtime, current)) {
+            void import("./handlers.ts").then(({ persistLabelRecord }) => persistLabelRecord(ctx, record)).catch(() => { /* logging never breaks settings */ });
+          }
           ctx.ui.setStatus("welder", welderStatusText(runtime));
           try {
             saveWelderConfig(current);

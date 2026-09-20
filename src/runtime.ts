@@ -91,7 +91,6 @@ export function resetSessionState(runtime: WelderRuntime): void {
   runtime.prospectiveLabels = createProspectiveLabelCollector({
     isEnabled: () => runtime.prospectiveLabelsEnabled,
     sessionId: () => runtime.stats.sessionId ?? "unknown",
-    onLabel: (record) => runtime.onProspectiveLabel?.(record),
   });
   void runtime.jevShadow?.shutdown();
   const maxFailures = runtime.recovery.maxFailures;

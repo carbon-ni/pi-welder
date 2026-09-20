@@ -53,9 +53,6 @@ export async function handleSessionStart(
   resetSessionState(runtime);
   runtime.stats.sessionId = sessionId(ctx);
   // Persist only safe shadow metadata (counts, ordinals, latency); payloads stay in memory.
-  runtime.onProspectiveLabel = (record) => {
-    void persistLabelRecord(ctx, record).catch(() => { /* logging never breaks tool flow */ });
-  };
   runtime.onShadowEvidence = (evidence) => {
     void appendEvent(logDir(ctx), sessionId(ctx), buildShadowEvent(evidence, modelMeta(ctx))).catch(() => { /* logging never breaks tool flow */ });
   };
@@ -347,15 +344,20 @@ export async function handleContext(runtime: WelderRuntime, event: ContextEvent,
 // --- TASK-0037: prospective label lifecycle (local only) --------------------
 
 /** Verified public lifecycle: start fires before validation, end fires after. */
-export function handleToolExecutionStart(runtime: WelderRuntime, event: { toolCallId: string; toolName: string; args: unknown }): void {
-  runtime.prospectiveLabels?.onToolStart({ toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
+export async function handleToolExecutionStart(
+  runtime: WelderRuntime,
+  event: { toolCallId: string; toolName: string; args: unknown },
+  ctx: WelderContext,
+): Promise<void> {
+  const expired = runtime.prospectiveLabels?.onToolStart({ toolCallId: event.toolCallId, toolName: event.toolName, args: event.args }) ?? [];
+  for (const record of expired) await persistLabelRecord(ctx, record);
 }
 
-export function handleToolExecutionEnd(
+export async function handleToolExecutionEnd(
   runtime: WelderRuntime,
   event: { toolCallId: string; toolName: string; isError: boolean; result?: unknown; args?: unknown },
-  ctx?: WelderContext,
-): void {
+  ctx: WelderContext,
+): Promise<void> {
   const failureText = errorTextOf(event.result);
   const records = runtime.prospectiveLabels?.onToolEnd({
     toolCallId: event.toolCallId,
@@ -364,7 +366,7 @@ export function handleToolExecutionEnd(
     args: event.args,
     ...(failureText === undefined ? {} : { errorText: failureText }),
   }) ?? [];
-  for (const record of records) if (ctx) void persistLabelRecord(ctx, record).catch(() => { /* logging never breaks tool flow */ });
+  for (const record of records) await persistLabelRecord(ctx, record);
 }
 
 /**

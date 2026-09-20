@@ -12,7 +12,7 @@
  * tokens, canonical roles, ordinals, and closed counters.
  */
 
-import { planMappings, type MappingPlan } from "../tool-mapping/planner.ts";
+import { planMappings, MAX_PLANS, type MappingPlan } from "../tool-mapping/planner.ts";
 import { buildToolMappingRequest } from "../tool-mapping/evaluation.ts";
 import type { MappingPair } from "../tool-mapping/planner.ts";
 import { TOOL_CONTRACTS } from "../tool-routing/contracts.ts";
@@ -84,7 +84,8 @@ export interface CollectorStats {
 }
 
 export interface ProspectiveLabelCollector {
-  onToolStart(event: ToolStart): void;
+  /** Returns any episodes expired by this start so the caller can persist them. */
+  onToolStart(event: ToolStart, now?: number): LabelRecord[];
   /** Finalizes on the correlated end: success labels, failure consumes the window. */
   onToolEnd(event: ToolEnd, now?: number): LabelRecord[];
   /** Closes every unresolved episode as persisted evidence (turn end/interruption). */
@@ -107,7 +108,6 @@ function derivePlan(meta: PlanMeta, snapshot: Record<string, unknown>): MappingP
 export function createProspectiveLabelCollector(options: {
   isEnabled: () => boolean;
   sessionId: () => string;
-  onLabel?: (record: LabelRecord) => void;
   maxPending?: number;
 }): ProspectiveLabelCollector {
   const maxPending = options.maxPending ?? MAX_PENDING_EPISODES;
@@ -127,6 +127,18 @@ export function createProspectiveLabelCollector(options: {
     if (index >= 0) confirmedOrder.splice(index, 1);
   };
 
+  const closureRecord = (episode: PendingEpisode, outcome: LabelOutcome, now: number): LabelRecord => ({
+    ts: new Date(now).toISOString(),
+    sessionId: options.sessionId(),
+    episodeId: episode.episodeId,
+    outcome,
+    sourceTool: episode.sourceTool,
+    pairs: [],
+    request: episode.request,
+    interveningCalls: Math.max(0, sequence - episode.confirmedSequence),
+    latencyMs: Math.max(0, now - episode.openedAt),
+  });
+
   const dropStart = (toolCallId: string): void => {
     const entry = starts.get(toolCallId);
     if (entry === undefined) return;
@@ -135,8 +147,8 @@ export function createProspectiveLabelCollector(options: {
   };
 
   return {
-    onToolStart(event) {
-      if (!options.isEnabled()) return;
+    onToolStart(event, now = Date.now()) {
+      if (!options.isEnabled()) return [];
       sequence++;
       stats.observedCalls++;
 
@@ -146,7 +158,7 @@ export function createProspectiveLabelCollector(options: {
         stats.oversizedStarts++;
         dropStart(event.toolCallId);
         stats.retainedRawBytes = retainedBytes;
-        return;
+        return [];
       }
       dropStart(event.toolCallId);
       starts.set(event.toolCallId, { toolName: event.toolName, args: event.args, sequence, bytes });
@@ -161,19 +173,18 @@ export function createProspectiveLabelCollector(options: {
       }
       stats.retainedRawBytes = retainedBytes;
 
-      // Bound pending episodes and expire windows that closed before this call.
-      while (pending.size > maxPending) {
-        const oldest = pending.keys().next();
-        if (oldest.done === true) break;
-        forget(oldest.value);
-        stats.expired++;
-      }
+      // Expire windows that closed before this call, oldest first, and return
+      // their outcomes so the caller persists them (never silently dropped).
+      const expired: LabelRecord[] = [];
       for (const [id, episode] of [...pending]) {
         if (sequence - episode.confirmedSequence > FOLLOWING_CALL_WINDOW) {
+          const record = closureRecord(episode, "expired", now);
           forget(id);
           stats.expired++;
+          expired.push(record);
         }
       }
+      return expired;
     },
 
     onToolEnd(event, now = Date.now()) {
@@ -206,6 +217,18 @@ export function createProspectiveLabelCollector(options: {
         }
         retainedBytes += argsBytes;
         stats.retainedRawBytes = retainedBytes;
+        // Bound immediately before opening: evict the oldest deterministically
+        // and return its outcome so the caller persists it.
+        const evicted: LabelRecord[] = [];
+        while (pending.size >= maxPending) {
+          const oldest = confirmedOrder[0];
+          if (oldest === undefined) break;
+          const stale = pending.get(oldest);
+          if (stale === undefined) { forget(oldest); continue; }
+          evicted.push(closureRecord(stale, "expired", now));
+          forget(oldest);
+          stats.expired++;
+        }
         pending.set(event.toolCallId, {
           episodeId: `${options.sessionId()}#${event.toolCallId}`,
           sourceTool: event.toolName,
@@ -217,8 +240,10 @@ export function createProspectiveLabelCollector(options: {
           openedAt: now,
         });
         confirmedOrder.push(event.toolCallId);
+        // The order list mirrors pending; keep it bounded even under stress.
+        while (confirmedOrder.length > maxPending) confirmedOrder.shift();
         stats.episodesOpened++;
-        return [];
+        return evicted;
       }
 
       // A failed, timed-out, aborted, or blocked call consumes the window but
@@ -262,7 +287,6 @@ export function createProspectiveLabelCollector(options: {
         };
         forget(id);
         stats.labelled++;
-        options.onLabel?.(record);
         emitted.push(record);
       }
       return emitted;
@@ -277,18 +301,7 @@ export function createProspectiveLabelCollector(options: {
         if (episode === undefined) continue;
         if (reason === "expired") stats.expired++;
         else stats.interrupted++;
-        const record: LabelRecord = {
-          ts: new Date(now).toISOString(),
-          sessionId: options.sessionId(),
-          episodeId: episode.episodeId,
-          outcome: reason,
-          sourceTool: episode.sourceTool,
-          pairs: [],
-          request: episode.request,
-          interveningCalls: Math.max(0, sequence - episode.confirmedSequence),
-          latencyMs: Math.max(0, now - episode.openedAt),
-        };
-        options.onLabel?.(record);
+        const record = closureRecord(episode, reason, now);
         emitted.push(record);
       }
       return emitted;
@@ -340,13 +353,16 @@ export function labelLineIsPrivacySafe(line: string): boolean {
   if (Object.keys(record).some((key) => !expected.has(key))) return false;
   if (record.eventType !== "prospective-label") return false;
   if (typeof record.ts !== "string" || Number.isNaN(Date.parse(record.ts))) return false;
+  if (!OUTCOMES.has(record.outcome as string)) return false;
   const identifier = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
   for (const key of ["sessionId", "episodeId", "sourceTool"]) {
-    if (typeof record[key] !== "string") return false;
+    if (typeof record[key] !== "string" || (record[key] as string).length > 200) return false;
   }
   if (typeof record.sourceTool !== "string" || !identifier.test(record.sourceTool)) return false;
   if (record.targetTool !== undefined && (typeof record.targetTool !== "string" || !identifier.test(record.targetTool))) return false;
-  if (!Array.isArray(record.pairs) || record.pairs.some((pair) => typeof pair !== "string")) return false;
+  if (record.planOrdinal !== undefined && (!Number.isInteger(record.planOrdinal) || (record.planOrdinal as number) < 1 || (record.planOrdinal as number) > MAX_PLANS)) return false;
+  if (!Array.isArray(record.pairs) || record.pairs.length > 5) return false;
+  if (record.pairs.some((pair) => typeof pair !== "string" || !PAIR_PATTERN.test(pair))) return false;
   if (!Number.isInteger(record.interveningCalls) || !Number.isInteger(record.latencyMs)) return false;
   return requestStateIsSafe(record.request);
 }
@@ -358,6 +374,15 @@ const FIELD_KEYS = new Set(["from", "role", "features"]);
 const FEATURE_KEYS = new Set(["kind", "shape", "lengthBucket", "tokenBucket", "itemBucket"]);
 const PRIOR_KEYS = new Set(["priorToolNames", "priorFailedCalls"]);
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
+/** `role<-from`: two closed identifiers joined by the exact arrow token. */
+const PAIR_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,60}<-([A-Za-z_][A-Za-z0-9_-]{0,60})?$/;
+/** Closed vocabularies: any value outside them fails the write. */
+const OUTCOMES = new Set(["labelled", "expired", "interrupted"]);
+const FEATURE_KINDS = new Set(["string", "number", "boolean", "array"]);
+const FEATURE_SHAPES = new Set(["path", "prose", "code", "shell", "collection", "numeric", "boolean", "value"]);
+const LENGTH_BUCKETS = new Set(["empty", "short", "medium", "long", "huge"]);
+const TOKEN_BUCKETS = new Set(["zero", "one", "few", "several", "many"]);
+const ITEM_BUCKETS = new Set(["one", "few", "several", "many"]);
 
 /**
  * The replay snapshot must be exactly the closed TASK-0036 request state: an
@@ -386,6 +411,12 @@ export function requestStateIsSafe(request: unknown): boolean {
       const features = spec.features as Record<string, unknown> | undefined;
       if (!features || typeof features !== "object" || Array.isArray(features)) return false;
       if (Object.keys(features).some((key) => !FEATURE_KEYS.has(key))) return false;
+      // Every feature VALUE is a closed enum: a forged secret here fails.
+      if (!FEATURE_KINDS.has(features.kind as string)) return false;
+      if (!FEATURE_SHAPES.has(features.shape as string)) return false;
+      if (!LENGTH_BUCKETS.has(features.lengthBucket as string)) return false;
+      if (!TOKEN_BUCKETS.has(features.tokenBucket as string)) return false;
+      if (features.itemBucket !== undefined && !ITEM_BUCKETS.has(features.itemBucket as string)) return false;
     }
   }
   const prior = state.prior as Record<string, unknown> | undefined;
@@ -394,17 +425,6 @@ export function requestStateIsSafe(request: unknown): boolean {
   if (!Array.isArray(prior.priorToolNames) || prior.priorToolNames.some((name) => typeof name !== "string" || !IDENTIFIER.test(name))) return false;
   if (!Number.isInteger(prior.priorFailedCalls)) return false;
   return true;
-}
-
-/** Nested walk: bounded depth, primitives only, closed feature vocabulary. */
-function nestedIsSafe(value: unknown, depth: number): boolean {
-  if (depth > 6) return false;
-  if (value === null || typeof value === "boolean" || typeof value === "number") return true;
-  if (typeof value === "string") return value.length <= 200 && !value.includes("\n");
-  if (Array.isArray(value)) return value.length <= 40 && value.every((entry) => nestedIsSafe(entry, depth + 1));
-  if (typeof value !== "object") return false;
-  const entries = Object.entries(value as Record<string, unknown>);
-  return entries.length <= 24 && entries.every(([key, entry]) => key.length <= 60 && nestedIsSafe(entry, depth + 1));
 }
 
 /** Guard used by tests and the writer: no value text can appear in a record. */

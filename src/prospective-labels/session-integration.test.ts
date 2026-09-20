@@ -61,7 +61,6 @@ async function runLifecycle(options: {
   const collector = createProspectiveLabelCollector({
     isEnabled: () => options.enabled ?? true,
     sessionId: () => "session-labels",
-    onLabel: (record) => records.push(record),
   });
 
   // Public inline-extension seam: the session drives the collector.
@@ -70,17 +69,19 @@ async function runLifecycle(options: {
     agentDir,
     extensionFactories: [(pi: any) => {
       factoryRan = true;
-      pi.on("tool_execution_start", (event: any) => collector.onToolStart(event));
+      // Single persistence owner: the inline extension returns-and-records,
+      // mirroring what welder handlers do.
+      pi.on("tool_execution_start", (event: any) => { records.push(...collector.onToolStart(event)); });
       pi.on("tool_execution_end", (event: any) => {
         const content = Array.isArray(event.result?.content) ? event.result.content : [];
         const errorText = content.map((block: any) => (typeof block?.text === "string" ? block.text : "")).filter(Boolean).join("\n");
-        collector.onToolEnd({
+        records.push(...collector.onToolEnd({
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           isError: event.isError === true,
           args: (event.result as { args?: unknown } | undefined)?.args,
           ...(errorText ? { errorText } : {}),
-        });
+        }));
       });
       // No turn_end closure: a correction legitimately arrives in the next turn.
     }],

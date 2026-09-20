@@ -111,7 +111,7 @@ export default function (pi: ExtensionHost) {
 
   // TASK-0037: local-only prospective labels. `tool_execution_start` carries the
   // pre-validation arguments; `tool_execution_end` confirms a validation failure.
-  pi.on("tool_execution_start", async (event) => handleToolExecutionStart(runtime, event));
+  pi.on("tool_execution_start", async (event, ctx) => handleToolExecutionStart(runtime, event, ctx));
   pi.on("tool_execution_end", async (event, ctx) => handleToolExecutionEnd(runtime, event, ctx));
   // TASK-0037: close unresolved episodes on a real user boundary, when the
   // agent settles, and on shutdown. `turn_end` is deliberately NOT used so a

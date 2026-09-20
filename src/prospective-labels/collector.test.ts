@@ -7,13 +7,12 @@ import { appendLine } from "./writer.ts";
 const validation = (tool: string) => `Validation failed for tool "${tool}":\n  - path: must have required properties path\n\nReceived arguments:\n{ "execute": "SECRET" }`;
 
 function collector(overrides: { enabled?: boolean } = {}) {
-  const labels: any[] = [];
+  // The collector never persists: every record is returned to the caller.
   const instance = createProspectiveLabelCollector({
     isEnabled: () => overrides.enabled ?? true,
     sessionId: () => "session-1",
-    onLabel: (record) => labels.push(record),
   });
-  return { instance, labels };
+  return { instance };
 }
 
 test("opens an episode only after an anchored Pi validation failure", () => {
@@ -38,7 +37,7 @@ test("opens an episode only after an anchored Pi validation failure", () => {
 });
 
 test("labels only on a correlated successful tool_execution_end", () => {
-  const { instance, labels } = collector();
+  const { instance } = collector();
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
 
@@ -51,7 +50,6 @@ test("labels only on a correlated successful tool_execution_end", () => {
   assert.equal(records[0]!.targetTool, "bash");
   assert.ok(records[0]!.pairs.includes("command<-execute"));
   assert.equal(instance.pendingCount(), 0, "the episode is consumed");
-  assert.equal(labels.length, 1);
 
   // A changed value never labels.
   instance.onToolStart({ toolCallId: "d1", toolName: "write", args: { execute: "git status" } });
@@ -63,21 +61,19 @@ test("labels only on a correlated successful tool_execution_end", () => {
 
 test("a failed, timed-out, aborted, or blocked corrected call consumes the window without labelling", () => {
   for (const label of ["failed", "timeout", "abort", "blocked"]) {
-    const { instance, labels } = collector();
+    const { instance } = collector();
     instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
     instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
     instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "git status" } });
     // The call ends in error: no label, window consumed.
     assert.deepEqual(instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: true, errorText: `${label} failure` }), []);
-    assert.equal(labels.length, 0, label);
     // Its success late cannot relabel the same episode either (already past).
     assert.deepEqual(instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }), [], label);
-    assert.equal(labels.length, 0, label);
   }
 });
 
 test("unresolved episodes are persisted on turn end or interruption", () => {
-  const { instance, labels } = collector();
+  const { instance } = collector();
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
 
@@ -93,7 +89,7 @@ test("unresolved episodes are persisted on turn end or interruption", () => {
   const interrupted = instance.closeUnresolved("interrupted", 6_000);
   assert.equal(interrupted[0]!.outcome, "interrupted");
   assert.equal(instance.stats().interrupted, 1);
-  assert.equal(labels.length, 2, "unresolved outcomes are persisted, not dropped");
+  assert.equal(expired.length + interrupted.length, 2, "unresolved outcomes are returned, never dropped");
 });
 
 test("excludes earlier parallel siblings and expires beyond the window", () => {
@@ -146,13 +142,13 @@ test("stays inert when disabled, keeps memory bounded, and clears on cleanup", (
 });
 
 test("records are privacy-safe and the writer rejects oversized or multiline lines", async () => {
-  const { instance, labels } = collector();
+  const { instance } = collector();
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "SECRET_COMMAND --flag /Users/me/x" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
   instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "SECRET_COMMAND --flag /Users/me/x" } });
-  instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
+  const returnedRecords = instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
 
-  const record = labels[0]!;
+  const record = returnedRecords[0]!;
   const rendered = renderLabelRecord(record);
   for (const forbidden of ["SECRET_COMMAND", "--flag", "/Users/", "git status"]) {
     assert.equal(rendered.includes(forbidden), false, `record leaked ${forbidden}`);
@@ -174,12 +170,12 @@ test("records are privacy-safe and the writer rejects oversized or multiline lin
 });
 
 test("privacy guards reject forged secret and nested fields at the write boundary", () => {
-  const { instance, labels } = collector();
+  const { instance } = collector();
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "printf ok" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
   instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "printf ok" } });
-  instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
-  const record = labels[0]!;
+  const labelled = instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
+  const record = labelled[0]!;
 
   // The rendered line is safe, and a forged top-level field is rejected.
   assert.equal(labelLineIsPrivacySafe(renderLabelRecord(record)), true);
@@ -200,4 +196,48 @@ test("privacy guards reject forged secret and nested fields at the write boundar
   assert.equal(labelLineIsPrivacySafe("not json"), false);
   assert.equal(labelLineIsPrivacySafe(`${renderLabelRecord(record)}\nextra`), false);
   assert.equal(labelLineIsPrivacySafe(JSON.stringify({ ...record, eventType: "other" })), false);
+});
+
+test("stress: repeated validation failures stay bounded and every eviction returns an outcome", () => {
+  const { instance } = collector();
+  const returned: any[] = [];
+  for (let index = 0; index < 20; index++) {
+    const id = `s${index}`;
+    returned.push(...instance.onToolStart({ toolCallId: id, toolName: "write", args: { execute: `cmd ${index}` } }, index));
+    returned.push(...instance.onToolEnd({ toolCallId: id, toolName: "write", isError: true, errorText: validation("write") }, index));
+  }
+  assert.ok(instance.pendingCount() <= 8, `pending stays bounded, got ${instance.pendingCount()}`);
+  assert.equal(returned.length, 20 - instance.pendingCount(), "every eviction is returned as an outcome");
+  assert.ok(returned.every((record) => record.outcome === "expired"), "evicted episodes are closed as expired");
+  assert.equal(instance.stats().episodesOpened, 20);
+  assert.equal(instance.stats().expired, 20 - instance.pendingCount());
+});
+
+test("privacy: a forged secret in each closed enum and in ids/pairs/outcome is rejected", () => {
+  const { instance } = collector();
+  instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "printf ok" } });
+  instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
+  instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "printf ok" } });
+  const record = instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000)[0]!;
+  const base = renderLabelRecord(record);
+  assert.equal(labelLineIsPrivacySafe(base), true);
+
+  const mutators: Array<[string, (parsed: any) => void]> = [
+    ["outcome", (parsed) => { parsed.outcome = "SECRET"; }],
+    ["sourceTool", (parsed) => { parsed.sourceTool = "SECRET TOOL"; }],
+    ["targetTool", (parsed) => { parsed.targetTool = "not a tool!"; }],
+    ["pair syntax", (parsed) => { parsed.pairs = ["command<-SECRET COMMAND"]; }],
+    ["plan ordinal range", (parsed) => { parsed.planOrdinal = 99; }],
+    ["feature kind", (parsed) => { parsed.request.plans[0].fields[0].features.kind = "SECRET"; }],
+    ["feature shape", (parsed) => { parsed.request.plans[0].fields[0].features.shape = "SECRET"; }],
+    ["length bucket", (parsed) => { parsed.request.plans[0].fields[0].features.lengthBucket = "SECRET"; }],
+    ["token bucket", (parsed) => { parsed.request.plans[0].fields[0].features.tokenBucket = "SECRET"; }],
+    ["item bucket", (parsed) => { parsed.request.plans[0].fields[0].features.itemBucket = "SECRET"; }],
+    ["nested secret", (parsed) => { parsed.request.leak = "SECRET"; }],
+  ];
+  for (const [label, mutate] of mutators) {
+    const parsed = JSON.parse(base);
+    mutate(parsed);
+    assert.equal(labelLineIsPrivacySafe(JSON.stringify(parsed)), false, label);
+  }
 });
