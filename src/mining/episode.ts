@@ -11,6 +11,37 @@ import { classifyErrorKind } from "../recorder/events.ts";
 export const PRIOR_LIMIT = 3;
 export const FOLLOWING_LIMIT = 3;
 
+/** Allowlist patterns for every token that reaches the shared report. */
+export const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,40}$/;
+export const ERROR_KIND_PATTERN = /^[A-Z][A-Z0-9_]{0,40}$/;
+export const OPAQUE_ID_PATTERN = /^[A-Za-z0-9_.:|+-]{1,120}$/;
+
+/**
+ * Closed vocabulary of failure kinds that may appear in a shared report.
+ * `classifyErrorKind` echoes the first uppercase token of arbitrary error text,
+ * so membership (not just shape) is required to stop stray prompt text.
+ */
+export const KNOWN_ERROR_KINDS: ReadonlySet<string> = new Set([
+  "TOOL_ERROR", "SCHEMA", "ENOENT", "EISDIR", "EACCES", "EPERM", "EEXIST", "ENOTDIR", "EOPNOTSUPP",
+  "EDIT_EMPTY_ANCHOR", "EDIT_INVALID_SHAPE", "EDIT_NOOP", "EDIT_OVERLAP", "EDIT_NOT_UNIQUE", "EDIT_NOT_FOUND", "EDIT_MISMATCH",
+  "TAP", "NX", "RUN", "STALE", "FAIL", "ABORT", "TIMEOUT", "UNKNOWN",
+]);
+
+/**
+ * Allowlists a token, or replaces it with `fallback`. Malformed or untrusted
+ * values (e.g. a tool name carrying prompt/conversation fragments) must never
+ * reach a shared artifact as raw text.
+ */
+export function safeToken(value: unknown, pattern: RegExp, fallback: string): string {
+  return typeof value === "string" && pattern.test(value) ? value : fallback;
+}
+
+/** Classifies and allowlists a failure kind against the closed vocabulary. */
+export function safeErrorKind(errorText: string | undefined): string {
+  const kind = classifyErrorKind(errorText ?? "");
+  return KNOWN_ERROR_KINDS.has(kind) && ERROR_KIND_PATTERN.test(kind) ? kind : "UNKNOWN";
+}
+
 export type EventKind = "user" | "assistant" | "toolCall" | "toolResult";
 
 /**
@@ -70,9 +101,10 @@ export interface MineOptions {
   followingLimit?: number;
 }
 
-/** Structural family: attempted tool plus classified failure kind. */
-export function structuralFamily(toolName: string, errorText: string | undefined): string {
-  return `${toolName}/${classifyErrorKind(errorText ?? "")}`;
+/** Structural family: attempted tool plus classified failure kind (allowlisted). */
+export function structuralFamily(toolName: unknown, errorText: string | undefined): string {
+  const tool = safeToken(toolName, TOOL_NAME_PATTERN, "unknown");
+  return `${tool}/${safeErrorKind(errorText)}`;
 }
 
 function isSameTarget(left: MiningEvent | undefined, right: MiningEvent | undefined): boolean {
@@ -136,26 +168,34 @@ export function linkageSignals(episode: Omit<FailedEpisode, "shape" | "signals" 
 export function mineEpisodes(sessionId: string, events: readonly MiningEvent[], options: MineOptions = {}): FailedEpisode[] {
   const priorLimit = options.priorLimit ?? PRIOR_LIMIT;
   const followingLimit = options.followingLimit ?? FOLLOWING_LIMIT;
-  const resultByCall = new Map<string, MiningEvent>();
-  for (const event of events) {
-    if (event.kind === "toolResult" && typeof event.toolCallId === "string") resultByCall.set(event.toolCallId, event);
-  }
 
   const episodes: FailedEpisode[] = [];
   for (let index = 0; index < events.length; index++) {
     const call = events[index]!;
     if (call.kind !== "toolCall" || typeof call.toolName !== "string") continue;
-    const result = typeof call.toolCallId === "string" ? resultByCall.get(call.toolCallId) : undefined;
+    const resultIndex = typeof call.toolCallId === "string"
+      ? events.findIndex((event) => event.kind === "toolResult" && event.toolCallId === call.toolCallId)
+      : -1;
+    const result = resultIndex === -1 ? undefined : events[resultIndex];
     const failed = result?.isError === true || result === undefined;
     if (!failed) continue;
 
     const prior = events.slice(Math.max(0, index - priorLimit), index);
-    // The matched failure result is part of the failure pair, never a following event.
-    const following = events
-      .slice(index + 1)
-      .filter((event) => event.id !== result?.id)
-      .slice(0, followingLimit);
-    const window = { episodeId: `${sessionId}#${call.toolCallId ?? call.id}`, sessionId, failedIndex: index, prior, call, ...(result === undefined ? {} : { result }), following };
+    // Following events begin strictly AFTER the matched failure result in
+    // original JSONL order. With parallel calls, sibling calls/results that
+    // precede the matched result are therefore never classified as following.
+    const followingStart = resultIndex === -1 ? index + 1 : resultIndex + 1;
+    const following = events.slice(followingStart, followingStart + followingLimit);
+    const safeSessionId = safeToken(sessionId, OPAQUE_ID_PATTERN, "unknown-session");
+    const window = {
+      episodeId: `${safeSessionId}#${safeToken(call.toolCallId ?? call.id, OPAQUE_ID_PATTERN, "unknown-call")}`,
+      sessionId: safeSessionId,
+      failedIndex: index,
+      prior,
+      call,
+      ...(result === undefined ? {} : { result }),
+      following,
+    };
     episodes.push({
       ...window,
       family: structuralFamily(call.toolName, result?.errorText),

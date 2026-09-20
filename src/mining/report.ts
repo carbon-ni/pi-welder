@@ -129,6 +129,8 @@ export function renderMiningReport(report: MiningReport): string {
     "",
     `Sessions: ${report.sessions}; episodes: ${report.episodes}.`,
     "",
+    "Recovery shapes and linkage signals are **structural observations of what happened next, not causal claims or intent labels**. Tool names and failure kinds are allowlisted; unrecognized values render as `unknown`/`UNKNOWN`.",
+    "",
     "## Structural families",
     "",
     "| family | episodes |",

@@ -75,10 +75,11 @@ async function readSession(filePath: string): Promise<{ sessionId: string; event
     if (message.role === "user" || message.role === "assistant") {
       const toolCalls = (Array.isArray(message.content) ? message.content : []).filter((block: any) => block?.type === "toolCall");
       const textContent = textOf(message.content);
-      if (toolCalls.length === 0) {
-        events.push({ id: `${entry.id ?? events.length}`, ts: entry.timestamp, kind: message.role === "user" ? "user" : "assistant", ...(textContent ? { contentText: textContent } : {}) });
-        continue;
+      // Preserve assistant text even when the same message also calls tools.
+      if (textContent) {
+        events.push({ id: `${entry.id ?? events.length}:text`, ts: entry.timestamp, kind: message.role === "user" ? "user" : "assistant", contentText: textContent });
       }
+      if (toolCalls.length === 0) continue;
       for (const block of toolCalls) {
         const input = (block.arguments ?? {}) as Record<string, unknown>;
         const { argKeys, argTypes } = argShape(input);
