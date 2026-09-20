@@ -1,7 +1,7 @@
 ---
 id: TASK-0033
 title: Mine and evaluate wrong-tool routing by argument schema
-status: doing
+status: done
 depends_on: [TASK-0030]
 priority: high
 tags: [routing, schema, wrong-tool, jeq, safety, mining]
