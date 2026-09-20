@@ -1,7 +1,7 @@
 ---
 id: TASK-0032
 title: Evaluate probabilistic occurrence selection for non-unique edits
-status: doing
+status: done
 depends_on: [TASK-0030]
 priority: high
 tags: [edit, not-unique, occurrences, jeq, evidence, safety]
