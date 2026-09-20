@@ -40,7 +40,7 @@ export interface RuntimeOptions {
   sourceShadowingEnabled?: boolean;
   readPathRepairEnabled?: boolean;
   commandReroutingEnabled?: boolean;
-  /** Test-only override; production derives from the frozen evidence verdict. */
+  /** Injected Jev adapters; the composition root creates them when an API key is available. */
   jevClient?: JevClient;
   readPathClient?: JevClient;
   /** Injected in tests for deterministic ids/timestamps. */
