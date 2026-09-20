@@ -14,7 +14,8 @@
     "eval:read-path": "node --experimental-strip-types scripts/read-path-eval.ts pairs",
     "eval:routing": "node --experimental-strip-types scripts/routing-eval.ts run",
     "eval:intent": "node --experimental-strip-types scripts/intent-eval.ts run",
-    "mine:episodes": "node --experimental-strip-types scripts/episode-mine.ts run"
+    "mine:episodes": "node --experimental-strip-types scripts/episode-mine.ts run",
+    "eval:mismatch": "node --experimental-strip-types scripts/mismatch-eval.ts run"
   },
   "pi": {
     "extensions": ["./src/index.ts"]
