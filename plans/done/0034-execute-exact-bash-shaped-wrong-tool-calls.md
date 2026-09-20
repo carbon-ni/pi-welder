@@ -1,7 +1,7 @@
 ---
 id: TASK-0034
 title: Execute exact bash-shaped wrong-tool calls
-status: doing
+status: done
 depends_on: [TASK-0033]
 priority: high
 tags: [bash, routing, execution, opt-in, security]
