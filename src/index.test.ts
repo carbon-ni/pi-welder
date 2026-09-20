@@ -11,13 +11,15 @@ interface Captured {
   commands: Record<string, { description: string; handler: (args: string, ctx: any) => Promise<void> }>;
   statuses: Array<[string, string | undefined]>;
   notifies: Array<[string, string]>;
+  tools: Array<{ name: string; parameters: unknown; prepareArguments?: (args: unknown) => unknown }>;
 }
 
 function loadExtension(): Captured {
-  const captured: Captured = { handlers: {}, commands: {}, statuses: [], notifies: [] };
+  const captured: Captured = { handlers: {}, commands: {}, statuses: [], notifies: [], tools: [] };
   const api = {
     on(event: string, handler: any) { captured.handlers[event] = handler; },
     registerCommand(name: string, def: any) { captured.commands[name] = def; },
+    registerTool(tool: any) { captured.tools.push(tool); },
   };
   factory(api as any);
   return captured;
@@ -47,6 +49,17 @@ test("factory registers tool_call/tool_result/context + session handlers and all
     assert.ok(c.commands[cmd], `${cmd} command registered`);
   }
   assert.equal(c.commands["welder-guidance"], undefined);
+});
+
+test("factory registers same-name bash-routing wrappers for read, write, and edit", () => {
+  const c = loadExtension();
+  assert.deepEqual(c.tools.map((tool) => tool.name).sort(), ["edit", "read", "write"]);
+  for (const tool of c.tools) {
+    assert.ok(tool.parameters, `${tool.name} keeps a strict schema`);
+    assert.equal(typeof tool.prepareArguments, "function", `${tool.name} prepares arguments`);
+    // A bash shape must stay native while rerouting is not enabled.
+    assert.deepEqual(tool.prepareArguments!({ command: "ls" }), { command: "ls" });
+  }
 });
 
 test("tool_call mutates event.input in place with repairs", async () => {

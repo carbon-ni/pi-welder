@@ -6,7 +6,7 @@ import { createJevShadow, type JevShadow, type ShadowEvidence } from "./model-re
 import { createReadPathState, type ReadPathState } from "./read-recovery/state.ts";
 import { READ_PATH_EVIDENCE } from "./read-recovery/evidence-gate.ts";
 import type { JevClient } from "./infra/typesafe.ts";
-import { clearPendingBashRoutes, createPendingBashRoutes, type BashExecutor, type PendingBashRoute } from "./command-routing/types.ts";
+import { clearBashRouteTokens, createBashRouteState, type BashRouteState } from "./command-routing/wrapper.ts";
 
 export interface WelderRuntime {
   stats: Stats;
@@ -21,10 +21,8 @@ export interface WelderRuntime {
   readPathRepairEnabled: boolean;
   /** TASK-0034 opt-in; exact bash-shaped wrong-tool execution. Default false. */
   commandReroutingEnabled: boolean;
-  /** Injected at the composition root; absent means the router abstains. */
-  bashExecutor?: BashExecutor;
-  /** Routed calls awaiting delivery, keyed by tool-call ID. */
-  pendingBashRoutes: Map<string, PendingBashRoute>;
+  /** Bounded one-use token state for the bash-routing wrappers. */
+  bashRouteState: BashRouteState;
   /**
    * True only when the predeclared evidence gate passes. Runtime mutation of
    * read paths additionally requires this; it stays false until the gate does.
@@ -48,7 +46,6 @@ export interface RuntimeOptions {
   sourceShadowingEnabled?: boolean;
   readPathRepairEnabled?: boolean;
   commandReroutingEnabled?: boolean;
-  bashExecutor?: BashExecutor;
   /** Test-only override; production derives from the frozen evidence verdict. */
   readPathMutationEnabled?: boolean;
   jevClient?: JevClient;
@@ -69,8 +66,7 @@ export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
     sourceShadowingEnabled: options.sourceShadowingEnabled ?? false,
     readPathRepairEnabled: options.readPathRepairEnabled ?? false,
     commandReroutingEnabled: options.commandReroutingEnabled ?? false,
-    bashExecutor: options.bashExecutor,
-    pendingBashRoutes: createPendingBashRoutes(),
+    bashRouteState: createBashRouteState({ isEnabled: () => runtime.commandReroutingEnabled }),
     readPathMutationEnabled: options.readPathMutationEnabled ?? READ_PATH_EVIDENCE.passed,
     readPathState: createReadPathState(),
     jevClient: options.jevClient,
@@ -90,7 +86,7 @@ export function resetSessionState(runtime: WelderRuntime): void {
   runtime.episodes = createEpisodeTracker();
   runtime.shadowEvidence = [];
   runtime.readPathState = createReadPathState();
-  clearPendingBashRoutes(runtime.pendingBashRoutes);
+  clearBashRouteTokens(runtime.bashRouteState);
   resetJevShadow(runtime);
 }
 

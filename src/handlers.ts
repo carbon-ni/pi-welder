@@ -28,8 +28,8 @@ import type { EpisodeRecord } from "./episodes.ts";
 import { buildRestoreReadReason, recognizeReadShapedEdit } from "./read-shape.ts";
 import { planReadPathRepair, runReadPathSelection, validateReadPathSelection } from "./read-recovery/path-repair.ts";
 import { recordReadPathSelection } from "./read-recovery/state.ts";
-import { buildBashRouteReason, recognizeBashShapedCall } from "./command-routing/gate.ts";
-import { consumePendingBashRoute, rememberPendingBashRoute, toBashRouteResult } from "./command-routing/types.ts";
+import { sentinelTokenOf } from "./command-routing/wrapper.ts";
+import { clearBashRouteTokens } from "./command-routing/wrapper.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
 
@@ -59,7 +59,7 @@ export async function handleSessionStart(
 }
 
 export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
-  runtime.pendingBashRoutes.clear();
+  clearBashRouteTokens(runtime.bashRouteState);
   await runtime.jevShadow?.shutdown().catch(() => { /* never block shutdown */ });
   await appendEpisodeRecords(runtime.episodes.closeAll(), ctx).catch(() => { /* never block shutdown */ });
   if (ctx.hasUI) ctx.ui.setStatus("welder", undefined);
@@ -88,11 +88,10 @@ export async function handleToolCall(
   const input = event.input;
   if (!input || typeof input !== "object") return undefined;
 
-  // TASK-0034: exact bash-shaped call addressed to read/write/edit. Checked on
-  // the ORIGINAL input, before any repair mutates it. Opt-in, trusted project,
-  // and an injected executor are mandatory; every other condition abstains.
-  const routedToBash = await routeBashShapedCall(runtime, event, ctx, input as Record<string, unknown>);
-  if (routedToBash) return routedToBash;
+  // TASK-0034: the bash-routing wrapper replaces an exact bash-shaped call with
+  // a schema-valid sentinel before this event fires. Welder repairs must never
+  // touch a sentinel, and the routed result must pass through unchanged.
+  if (sentinelTokenOf(input) !== undefined) return undefined;
 
   // Read-shaped edit: recognized on the ORIGINAL input (repairArgs could add
   // defaults), blocked before execution, and answered with the exact read call.
@@ -203,71 +202,6 @@ function readSingleEditOldText(input: Record<string, unknown>): string | undefin
   return typeof oldText === "string" ? oldText : undefined;
 }
 
-/**
- * Executes an exact bash-shaped wrong-tool call exactly once and blocks it.
- *
- * Pi 0.85.0 cannot replace tool identity from `tool_call`, and a blocked call
- * is finalized as `{ kind: "immediate" }` WITHOUT running `afterToolCall`, so
- * no `tool_result` event exists to patch. The real output is therefore carried
- * by the block reason. The pending entry keeps the outcome keyed by call ID so
- * a host that does emit a result can be patched, and so a repeated call ID can
- * never execute a second time.
- */
-async function routeBashShapedCall(
-  runtime: WelderRuntime,
-  event: ToolCallEvent,
-  ctx: WelderContext,
-  input: Record<string, unknown>,
-): Promise<ToolCallOutcome> {
-  if (!runtime.enabled || !runtime.commandReroutingEnabled) return undefined;
-  if (runtime.disabledRepairs.has("route-to-bash")) return undefined;
-
-  const call = recognizeBashShapedCall(event.toolName, input);
-  if (!call) return undefined;
-  if (ctx.isProjectTrusted?.() !== true) return undefined;
-  if (!runtime.bashExecutor) return undefined;
-  if (typeof event.toolCallId !== "string" || event.toolCallId.length === 0) return undefined;
-  if (runtime.pendingBashRoutes.has(event.toolCallId)) return undefined;
-
-  runtime.stats.totalToolCalls++;
-  let outcome;
-  try {
-    outcome = await runtime.bashExecutor.execute({
-      toolCallId: event.toolCallId,
-      command: call.command,
-      ...(call.timeout === undefined ? {} : { timeout: call.timeout }),
-      cwd: ctx.cwd,
-      ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
-    });
-  } catch {
-    return undefined; // fail closed: the original call proceeds and fails as before
-  }
-
-  rememberPendingBashRoute(runtime.pendingBashRoutes, {
-    toolCallId: event.toolCallId,
-    sourceTool: event.toolName,
-    outcome,
-    delivered: true,
-  });
-
-  const repairs: Repair[] = [{ field: "input", action: "route-to-bash" }];
-  recordRepairs(runtime.stats, repairs);
-  recordRepairWarnings(runtime.repairWarnings, repairs, event.toolName);
-  if (ctx.hasUI) ctx.ui.setStatus("welder", repairStatusText(event.toolName, repairs));
-  // Audit contains the source and target tool names only: no command, no args.
-  await appendEvent(logDir(ctx), sessionId(ctx), buildEvent({
-    eventType: "tool_call",
-    toolName: event.toolName,
-    targetTool: "bash",
-    ...modelMeta(ctx),
-    repairs,
-    inputKeys: [],
-  })).catch(() => { /* logging never breaks tool flow */ });
-  runtime.episodes.observeCall({ toolName: event.toolName, actions: ["route-to-bash"] });
-
-  return { block: true, reason: buildBashRouteReason(event.toolName, outcome) };
-}
-
 export function repairToolInput(
   runtime: WelderRuntime,
   toolName: string,
@@ -317,10 +251,8 @@ export async function handleToolResult(
   event: ToolResultEvent,
   ctx: WelderContext,
 ): Promise<ResultRepairPatch | undefined> {
-  // TASK-0034: a routed call that reaches a result (hosts that emit one) is
-  // patched with the real bash content/outcome, then the pending entry is gone.
-  const pendingRoute = consumePendingBashRoute(runtime.pendingBashRoutes, event.toolCallId);
-  if (pendingRoute) return toBashRouteResult(pendingRoute);
+  // TASK-0034: a routed call's real bash result passes through untouched.
+  if (sentinelTokenOf(event.input) !== undefined) return undefined;
 
   // Correlate this result with episodes opened before the call was made.
   const closedRecords = runtime.episodes.observeResult({ toolName: event.toolName, isError: event.isError === true });

@@ -65,7 +65,27 @@ interface ExtensionEvents {
   session_shutdown: unknown;
 }
 
+/**
+ * Structurally compatible with Pi's `ToolDefinition`. Same-name registration
+ * overrides a built-in tool, and omitted renderers inherit the built-in one.
+ */
+export interface WelderToolDefinition {
+  name: string;
+  label: string;
+  description: string;
+  parameters: unknown;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
+  renderShell?: string;
+  executionMode?: string;
+  prepareArguments?: (args: unknown) => unknown;
+  execute: (toolCallId: string, params: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) => Promise<any>;
+  renderCall?: (args: any, theme: any, context: any) => unknown;
+  renderResult?: (result: any, options: any, theme: any, context: any) => unknown;
+}
+
 export interface ExtensionHost extends CommandRegistrar {
+  registerTool(tool: WelderToolDefinition): void;
   on<EventName extends keyof ExtensionEvents>(
     event: EventName,
     handler: (event: ExtensionEvents[EventName], context: WelderContext) => Promise<unknown>,

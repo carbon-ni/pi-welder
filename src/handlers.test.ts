@@ -672,177 +672,132 @@ test("persisted shadow JSONL events contain no source, paths, or edit text", asy
   }
 });
 
-// --- TASK-0034: exact bash-shaped wrong-tool execution ---------------------
+// --- TASK-0034 (redesign): same-name wrapper, prepare -> validate -> execute -
 
-interface RecordedBashCall { toolCallId: string; command: string; timeout?: number; cwd: string; signal?: AbortSignal }
+import { mkdtemp as mkdtempRoute, readFile as readFileRoute } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { createBashTool, createReadToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createBashRouteState, sentinelTokenOf, wrapToolForBashRouting, type BashDelegate, type RouteToolName, type ToolLike } from "./command-routing/wrapper.ts";
 
-function routeRuntime(
-  executor: { execute: (request: any) => Promise<any> },
-  overrides: Parameters<typeof createRuntime>[0] = {},
-) {
-  return createRuntime({ commandReroutingEnabled: true, bashExecutor: executor as any, ...overrides });
+/** Pi's own validator, resolved through the SDK's public export map. */
+async function piValidateToolArguments(tool: unknown, toolCall: { name: string; id: string; arguments: unknown }): Promise<unknown> {
+  const parent = import.meta.resolve("@earendil-works/pi-coding-agent");
+  const ai = await import(import.meta.resolve("@earendil-works/pi-ai", parent)) as { validateToolArguments: (tool: unknown, call: unknown) => unknown };
+  return ai.validateToolArguments(tool, toolCall);
 }
 
-function routeCtx(overrides: Partial<any> = {}): any {
-  return ctx({ isProjectTrusted: () => true, ...overrides });
+function resolveBuiltinFor(toolName: RouteToolName) {
+  return (cwd: string): ToolLike => {
+    if (toolName === "write") return createWriteToolDefinition(cwd) as unknown as ToolLike;
+    return createReadToolDefinition(cwd) as unknown as ToolLike;
+  };
 }
 
-test("handleToolCall executes an exact bash-shaped write once and blocks it with the real output", async () => {
-  const calls: RecordedBashCall[] = [];
-  const runtime = routeRuntime({
-    execute: async (request: RecordedBashCall) => {
-      calls.push(request);
-      return { text: "hello from bash", isError: false };
-    },
+const realBashDelegate: BashDelegate = async ({ command, timeout, cwd, signal, toolCallId }) => {
+  const tool = createBashTool(cwd);
+  const result = await tool.execute(toolCallId, { command, ...(timeout === undefined ? {} : { timeout }) }, signal);
+  return { content: result.content, details: result.details, isError: false };
+};
+
+test("lifecycle: prepare -> native validation -> execute routes write(command,timeout) to bash exactly once", async () => {
+  const root = await mkdtempRoute(path.join(tmpdir(), "welder-route-lifecycle-"));
+  const marker = path.join(root, "counter.txt");
+  const routeState = createBashRouteState({ isEnabled: () => true, isTrusted: () => true });
+  const wrapper = wrapToolForBashRouting({
+    builtin: createWriteToolDefinition(root) as unknown as ToolLike,
+    toolName: "write",
+    state: routeState,
+    delegate: realBashDelegate,
+    resolveBuiltin: resolveBuiltinFor("write"),
+    nextToken: () => "opaque-token-1",
   });
-  const event = { toolName: "write", toolCallId: "route-1", input: { command: "ls -la", timeout: 30 } };
+  const toolCall = { name: "write", id: "call-lifecycle-1", arguments: { command: `printf hello && printf x >> ${marker}`, timeout: 20 } };
 
-  const outcome = await handleToolCall(runtime, event as any, routeCtx({ cwd: "/tmp/project" }));
+  // 1. prepareArguments swaps the bash shape for a source-schema-valid sentinel.
+  const prepared = wrapper.prepareArguments!(toolCall.arguments) as Record<string, unknown>;
+  assert.equal(sentinelTokenOf(prepared), "opaque-token-1");
+  assert.equal(JSON.stringify(prepared).includes("printf"), false, "the sentinel never carries the command");
 
-  assert.ok(outcome);
-  assert.deepEqual(Object.keys(outcome!).sort(), ["block", "reason"], "only Pi's supported blocking fields");
-  assert.equal(outcome!.block, true);
-  assert.match(outcome!.reason, /blocked this write call/);
-  assert.match(outcome!.reason, /hello from bash/);
-  assert.equal(outcome!.reason.includes("ls -la"), false, "the command is never echoed");
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { toolCallId: "route-1", command: "ls -la", timeout: 30, cwd: "/tmp/project" });
-  assert.equal(runtime.stats.repairsByAction.get("route-to-bash"), 1);
-  assert.equal(runtime.pendingBashRoutes.has("route-1"), true);
+  // 2. Pi's own validator accepts the sentinel against the strict write schema.
+  const validated = await piValidateToolArguments({ name: "write", parameters: wrapper.parameters, execute: wrapper.execute }, { ...toolCall, arguments: prepared });
+  assert.deepEqual(validated, prepared);
+
+  // 3. execute reaches the real bash tool once and returns a non-error success.
+  const result: any = await wrapper.execute(toolCall.id, validated, undefined, undefined, { cwd: root, isProjectTrusted: () => true });
+  assert.equal(result.isError === true, false, "a successful route is not an error result");
+  assert.match(result.content[0].text, /hello/);
+  assert.equal(await readFileRoute(marker, "utf8"), "x", "the command ran exactly once");
+  assert.equal(routeState.tokens.size, 0, "the token is consumed");
 });
 
-test("the abort signal is forwarded and an absent timeout stays absent", async () => {
-  const calls: RecordedBashCall[] = [];
-  const runtime = routeRuntime({ execute: async (request: RecordedBashCall) => { calls.push(request); return { text: "ok", isError: false }; } });
-  const controller = new AbortController();
-
-  await handleToolCall(runtime, { toolName: "read", toolCallId: "signal-1", input: { command: "sleep 1" } } as any, routeCtx({ signal: controller.signal }));
-
-  assert.equal(calls[0]!.signal, controller.signal, "the turn signal is preserved");
-  assert.equal("timeout" in calls[0]!, false, "no invented timeout");
-});
-
-test("a failed command is reported as failed and never as success", async () => {
-  const runtime = routeRuntime({
-    execute: async () => ({ text: "boom\n\nCommand exited with code 2", isError: true }),
+test("lifecycle: disabled stays on native validation and never executes", async () => {
+  const root = await mkdtempRoute(path.join(tmpdir(), "welder-route-disabled-"));
+  const marker = path.join(root, "counter.txt");
+  const routeState = createBashRouteState({ isEnabled: () => false, isTrusted: () => true });
+  let bashCalls = 0;
+  const wrapper = wrapToolForBashRouting({
+    builtin: createWriteToolDefinition(root) as unknown as ToolLike,
+    toolName: "write",
+    state: routeState,
+    delegate: async () => { bashCalls++; return { content: [] }; },
+    resolveBuiltin: resolveBuiltinFor("write"),
+    nextToken: () => "opaque-token-1",
   });
+  const raw = { command: `printf x >> ${marker}`, timeout: 20 };
 
-  const outcome = await handleToolCall(runtime, { toolName: "read", toolCallId: "route-2", input: { command: "false" } } as any, routeCtx());
-
-  assert.match(outcome!.reason, /ran once through bash and failed/);
-  assert.match(outcome!.reason, /Command exited with code 2/);
+  const prepared = wrapper.prepareArguments!(raw);
+  assert.deepEqual(prepared, raw, "args are left unchanged for native validation");
+  await assert.rejects(
+    () => piValidateToolArguments({ name: "write", parameters: wrapper.parameters, execute: wrapper.execute }, { name: "write", id: "c", arguments: prepared }),
+    /Validation failed for tool "write"/,
+  );
+  assert.equal(bashCalls, 0);
+  await assert.rejects(() => readFileRoute(marker, "utf8"), "nothing executed");
 });
 
-test("an executor rejection fails closed: the original call is not blocked", async () => {
-  let calls = 0;
-  const runtime = routeRuntime({ execute: async () => { calls++; throw new Error("executor exploded"); } });
-
-  const outcome = await handleToolCall(runtime, { toolName: "edit", toolCallId: "route-3", input: { command: "echo hi" } } as any, routeCtx());
-
-  assert.equal(outcome, undefined, "no claim of success when the executor fails");
-  assert.equal(calls, 1);
-  assert.equal(runtime.pendingBashRoutes.size, 0);
-});
-
-test("handleToolCall abstains unless every mandatory condition holds", async () => {
-  const cases: { label: string; runtime: any; ctx: any; event: any }[] = [
-    { label: "setting off", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }, { commandReroutingEnabled: false }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
-    { label: "repairs disabled", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }, { repairsEnabled: false }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
-    { label: "repair rule disabled", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }, { disabledRepairs: ["route-to-bash"] }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
-    { label: "untrusted project", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx({ isProjectTrusted: () => false }), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
-    { label: "missing trust callback", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: ctx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
-    { label: "no executor", runtime: createRuntime({ commandReroutingEnabled: true }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
-    { label: "attempted bash", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "bash", toolCallId: "c", input: { command: "ls" } } },
-    { label: "unknown tool", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "ast_map", toolCallId: "c", input: { command: "ls" } } },
-    { label: "extra field", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls", path: "a.ts" } } },
-    { label: "invalid timeout", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls", timeout: -1 } } },
-    { label: "empty command", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "  " } } },
-    { label: "valid write shape", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { path: "a.ts", content: "x" } } },
-    { label: "missing call id", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", input: { command: "ls" } } },
-  ];
-
-  for (const entry of cases) {
-    const outcome = await handleToolCall(entry.runtime, entry.event as any, entry.ctx);
-    assert.equal(outcome, undefined, entry.label);
-    assert.equal(entry.runtime.pendingBashRoutes.size, 0, entry.label);
-    assert.equal(entry.runtime.stats.repairsByAction.get("route-to-bash"), undefined, entry.label);
-  }
-});
-
-test("parallel call IDs stay isolated and each executes exactly once", async () => {
-  const seen: string[] = [];
-  const runtime = routeRuntime({
-    execute: async ({ command }: RecordedBashCall) => {
-      seen.push(command);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return { text: `out:${command}`, isError: false };
-    },
+test("lifecycle: untrusted project stays on native validation and never executes", async () => {
+  const root = await mkdtempRoute(path.join(tmpdir(), "welder-route-untrusted-"));
+  const marker = path.join(root, "counter.txt");
+  const routeState = createBashRouteState({ isEnabled: () => true, isTrusted: () => false });
+  let bashCalls = 0;
+  const wrapper = wrapToolForBashRouting({
+    builtin: createWriteToolDefinition(root) as unknown as ToolLike,
+    toolName: "write",
+    state: routeState,
+    delegate: async () => { bashCalls++; return { content: [] }; },
+    resolveBuiltin: resolveBuiltinFor("write"),
+    nextToken: () => "opaque-token-1",
   });
+  const raw = { command: `printf x >> ${marker}`, timeout: 20 };
 
-  const [first, second] = await Promise.all([
-    handleToolCall(runtime, { toolName: "write", toolCallId: "p1", input: { command: "one" } } as any, routeCtx()),
-    handleToolCall(runtime, { toolName: "read", toolCallId: "p2", input: { command: "two" } } as any, routeCtx()),
-  ]);
-
-  assert.match(first!.reason, /out:one/);
-  assert.equal(first!.reason.includes("out:two"), false, "no cross-talk between call IDs");
-  assert.match(second!.reason, /out:two/);
-  assert.equal(second!.reason.includes("out:one"), false);
-  assert.deepEqual(seen.sort(), ["one", "two"]);
-  assert.equal(runtime.pendingBashRoutes.size, 2);
+  const prepared = wrapper.prepareArguments!(raw);
+  assert.deepEqual(prepared, raw);
+  await assert.rejects(
+    () => piValidateToolArguments({ name: "write", parameters: wrapper.parameters, execute: wrapper.execute }, { name: "write", id: "c", arguments: prepared }),
+    /Validation failed for tool "write"/,
+  );
+  assert.equal(bashCalls, 0);
+  await assert.rejects(() => readFileRoute(marker, "utf8"));
 });
 
-test("a repeated call ID never executes the command twice", async () => {
-  let calls = 0;
-  const runtime = routeRuntime({ execute: async () => { calls++; return { text: "once", isError: false }; } });
-  const event = { toolName: "write", toolCallId: "dup", input: { command: "echo once" } };
+test("handleToolCall leaves a routed sentinel untouched and handleToolResult passes the bash result through", async () => {
+  const runtime = createRuntime({ commandReroutingEnabled: true });
+  const sentinel = { path: "pi-welder-route:opaque-token-1", content: "" };
 
-  const first = await handleToolCall(runtime, event as any, routeCtx());
-  const second = await handleToolCall(runtime, event as any, routeCtx());
+  const outcome = await handleToolCall(runtime, { toolName: "write", toolCallId: "s1", input: { ...sentinel } } as any, ctx());
+  assert.equal(outcome, undefined, "welder repairs never touch a sentinel");
+  assert.equal(runtime.stats.repairsByAction.get("route-to-bash"), undefined);
+  assert.equal(runtime.stats.totalToolCalls, 0);
 
-  assert.ok(first);
-  assert.equal(second, undefined, "duplicate ID abstains");
-  assert.equal(calls, 1);
+  const patched = await handleToolResult(runtime, { toolName: "write", toolCallId: "s1", input: { ...sentinel }, isError: false, content: [{ type: "text", text: "bash output" }] } as any, ctx());
+  assert.equal(patched, undefined, "the real bash result passes through unchanged");
 });
 
-test("the audit event carries source and target tool names only", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "welder-route-audit-"));
-  const runtime = routeRuntime({ execute: async () => ({ text: "audited output", isError: false }) });
-  await handleToolCall(runtime, { toolName: "edit", toolCallId: "audit-1", input: { command: "touch SECRET_MARKER" } } as any, routeCtx({ cwd: root }));
-  await new Promise((resolve) => setTimeout(resolve, 30));
+test("session shutdown clears the bash route token state", async () => {
+  const runtime = createRuntime({ commandReroutingEnabled: true });
+  runtime.bashRouteState.tokens.set("tok", { command: "echo hi" });
 
-  const raw = await (await import("node:fs/promises")).readFile(path.join(root, ".pi", "welder-log", "handlers-test.jsonl"), "utf8");
-  const events = raw.trim().split("\n").map((line) => JSON.parse(line));
-  const routed = events.find((event) => Array.isArray(event.repairs) && event.repairs.includes("route-to-bash"))!;
-  assert.equal(routed.toolName, "edit", "source tool");
-  assert.equal(routed.targetTool, "bash", "target tool");
-  assert.deepEqual(routed.inputKeys, []);
-  assert.equal(raw.includes("touch SECRET_MARKER"), false, "the command never reaches the log");
-  assert.equal(raw.includes("audited output"), false, "command output never reaches the log");
-});
+  await handleSessionShutdown(runtime, ctx());
 
-test("a routed call result is patched with the real bash outcome when a host emits one", async () => {
-  const runtime = routeRuntime({ execute: async () => ({ text: "patched output", details: { truncation: { truncated: false } }, isError: false }) });
-  await handleToolCall(runtime, { toolName: "write", toolCallId: "patch-1", input: { command: "echo hi" } } as any, routeCtx());
-
-  const patch = await handleToolResult(runtime, { toolName: "write", toolCallId: "patch-1", isError: true, content: [{ type: "text", text: "block reason" }] } as any, routeCtx());
-
-  assert.ok(patch);
-  assert.deepEqual((patch as any).content, [{ type: "text", text: "patched output" }]);
-  assert.equal((patch as any).isError, false);
-  assert.deepEqual((patch as any).details, { truncation: { truncated: false } });
-  assert.equal(runtime.pendingBashRoutes.size, 0, "pending state cleared on consumption");
-
-  const again = await handleToolResult(runtime, { toolName: "write", toolCallId: "patch-1", isError: true } as any, routeCtx());
-  assert.equal(again, undefined, "a consumed route is never applied twice");
-});
-
-test("session shutdown clears pending routed calls", async () => {
-  const runtime = routeRuntime({ execute: async () => ({ text: "x", isError: false }) });
-  await handleToolCall(runtime, { toolName: "write", toolCallId: "shutdown-1", input: { command: "ls" } } as any, routeCtx());
-  assert.equal(runtime.pendingBashRoutes.size, 1);
-
-  await handleSessionShutdown(runtime, routeCtx());
-
-  assert.equal(runtime.pendingBashRoutes.size, 0);
+  assert.equal(runtime.bashRouteState.tokens.size, 0);
 });
