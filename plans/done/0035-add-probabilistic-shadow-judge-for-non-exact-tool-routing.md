@@ -1,7 +1,7 @@
 ---
 id: TASK-0035
 title: Add probabilistic shadow judge for non-exact tool routing
-status: doing
+status: done
 depends_on: [TASK-0033, TASK-0034]
 priority: high
 tags: [routing, aliases, jev, shadow, commands, evidence]
