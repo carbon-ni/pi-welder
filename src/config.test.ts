@@ -11,7 +11,7 @@ test("parseWelderConfig defaults model repair reporting off, limit to 3, repairs
     disabledRepairs: [],
     sourceShadowingEnabled: false,
     readPathRepairEnabled: false,
-    commandReroutingEnabled: false,
+    commandReroutingEnabled: false, prospectiveLabelsEnabled: false,
   });
 });
 
@@ -75,17 +75,17 @@ test("loadWelderConfig parses JSON from injected reader", () => {
 test("saveWelderConfig writes JSON via injected writer", () => {
   let captured: { path: string; data: string } | null = null;
   saveWelderConfig(
-    { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false },
+    { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false, prospectiveLabelsEnabled: false },
     "/agent/welder.json",
     (path, data) => { captured = { path, data }; },
   );
   assert.equal(captured!.path, "/agent/welder.json");
-  assert.deepEqual(JSON.parse(captured!.data), { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false });
+  assert.deepEqual(JSON.parse(captured!.data), { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 5, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false, prospectiveLabelsEnabled: false });
 });
 
 test("saveWelderConfig serializes a disabled config", () => {
   let data = "";
-  saveWelderConfig({ modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: false, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false }, "/x", (_p, d) => { data = d; });
+  saveWelderConfig({ modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: false, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false, prospectiveLabelsEnabled: false }, "/x", (_p, d) => { data = d; });
   assert.equal(JSON.parse(data).modelRepairReportingEnabled, false);
   assert.equal(JSON.parse(data).repairsEnabled, false);
 });

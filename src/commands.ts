@@ -119,6 +119,10 @@ export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig)
   setRepairsEnabled(runtime, current.repairsEnabled);
   setDisabledRepairs(runtime, current.disabledRepairs);
   setCommandReroutingEnabled(runtime, current.commandReroutingEnabled);
+  if (runtime.prospectiveLabelsEnabled !== current.prospectiveLabelsEnabled) {
+    runtime.prospectiveLabelsEnabled = current.prospectiveLabelsEnabled;
+    runtime.prospectiveLabels?.clear();
+  }
   setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
   try {
     setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);

@@ -31,6 +31,8 @@ import {
   handleSessionShutdown,
   handleSessionStart,
   handleToolCall,
+  handleToolExecutionEnd,
+  handleToolExecutionStart,
   handleToolResult,
 } from "./handlers.ts";
 import { createRuntime, setBashRouteTrust } from "./runtime.ts";
@@ -105,6 +107,11 @@ export default function (pi: ExtensionHost) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => handleSessionShutdown(runtime, ctx));
+
+  // TASK-0037: local-only prospective labels. `tool_execution_start` carries the
+  // pre-validation arguments; `tool_execution_end` confirms a validation failure.
+  pi.on("tool_execution_start", async (event) => handleToolExecutionStart(runtime, event));
+  pi.on("tool_execution_end", async (event) => handleToolExecutionEnd(runtime, event));
 
   pi.on("tool_call", async (event, ctx) => handleToolCall(runtime, event, ctx));
 

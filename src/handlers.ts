@@ -29,6 +29,8 @@ import { buildRestoreReadReason, recognizeReadShapedEdit } from "./read-shape.ts
 import { planReadPathRepair, runReadPathSelection, validateReadPathSelection } from "./read-recovery/path-repair.ts";
 import { recordReadPathSelection } from "./read-recovery/state.ts";
 import { sentinelTokenOf } from "./command-routing/wrapper.ts";
+import { renderLabelRecord, type LabelRecord } from "./prospective-labels/collector.ts";
+import { appendLine } from "./prospective-labels/writer.ts";
 import { clearBashRouteTokens } from "./command-routing/wrapper.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
@@ -51,6 +53,9 @@ export async function handleSessionStart(
   resetSessionState(runtime);
   runtime.stats.sessionId = sessionId(ctx);
   // Persist only safe shadow metadata (counts, ordinals, latency); payloads stay in memory.
+  runtime.onProspectiveLabel = (record) => {
+    void persistLabelRecord(ctx, record).catch(() => { /* logging never breaks tool flow */ });
+  };
   runtime.onShadowEvidence = (evidence) => {
     void appendEvent(logDir(ctx), sessionId(ctx), buildShadowEvent(evidence, modelMeta(ctx))).catch(() => { /* logging never breaks tool flow */ });
   };
@@ -59,6 +64,7 @@ export async function handleSessionStart(
 }
 
 export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
+  runtime.prospectiveLabels?.clear();
   clearBashRouteTokens(runtime.bashRouteState);
   await runtime.jevShadow?.shutdown().catch(() => { /* never block shutdown */ });
   await appendEpisodeRecords(runtime.episodes.closeAll(), ctx).catch(() => { /* never block shutdown */ });
@@ -164,6 +170,10 @@ export async function handleToolCall(
   }
 
   observeAndMaybeSubmitShadow(runtime, event, ctx, input as Record<string, unknown>);
+
+  // TASK-0037: a `tool_call` event only fires after validation passed, so this
+  // is the corrected-call observation point for a pending episode.
+  await handleToolExecutionSuccess(runtime, { toolName: event.toolName, args: input }, ctx).catch(() => undefined);
 
   runtime.episodes.observeCall({ toolName: event.toolName, actions: callActions });
   return undefined;
@@ -333,4 +343,51 @@ export async function handleContext(runtime: WelderRuntime, event: ContextEvent,
   const evicted = runtime.episodes.openWarnings(runtime.repairWarnings.warnings);
   await appendEpisodeRecords(evicted, ctx).catch(() => { /* logging never breaks context */ });
   return { messages: [...event.messages, ...warningMessages] };
+}
+
+
+// --- TASK-0037: prospective label lifecycle (local only) --------------------
+
+/** Verified public lifecycle: start fires before validation, end fires after. */
+export function handleToolExecutionStart(runtime: WelderRuntime, event: { toolCallId: string; toolName: string; args: unknown }): void {
+  runtime.prospectiveLabels?.onToolStart({ toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
+}
+
+export function handleToolExecutionEnd(
+  runtime: WelderRuntime,
+  event: { toolCallId: string; toolName: string; isError: boolean; result?: unknown },
+): void {
+  runtime.prospectiveLabels?.onToolEnd({
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    isError: event.isError,
+    ...(errorTextOf(event.result) === undefined ? {} : { errorText: errorTextOf(event.result) }),
+  });
+}
+
+/** Successful call observation: may label a pending episode. */
+export async function handleToolExecutionSuccess(
+  runtime: WelderRuntime,
+  event: { toolName: string; args: unknown },
+  ctx?: WelderContext,
+): Promise<LabelRecord | undefined> {
+  const record = runtime.prospectiveLabels?.onToolSuccess(event.toolName, event.args, Date.now());
+  if (!record || !ctx) return record;
+  await persistLabelRecord(ctx, record);
+  return record;
+}
+
+function errorTextOf(result: unknown): string | undefined {
+  const content = (result as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((block) => (block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : ""))
+    .filter(Boolean)
+    .join("\n");
+  return text.length === 0 ? undefined : text;
+}
+
+/** Persist a privacy-safe record; never fails the tool flow. */
+export async function persistLabelRecord(ctx: WelderContext, record: LabelRecord): Promise<void> {
+  await appendLine(logDir(ctx), `${sessionId(ctx)}.labels.jsonl`, renderLabelRecord(record)).catch(() => { /* logging never breaks tool flow */ });
 }

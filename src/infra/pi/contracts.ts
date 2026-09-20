@@ -57,7 +57,12 @@ export interface CommandRegistrar {
   }): void;
 }
 
+export interface ToolExecutionStartEvent { toolCallId: string; toolName: string; args: unknown }
+export interface ToolExecutionEndEvent { toolCallId: string; toolName: string; isError: boolean; result?: unknown }
+
 interface ExtensionEvents {
+  tool_execution_start: ToolExecutionStartEvent;
+  tool_execution_end: ToolExecutionEndEvent;
   tool_call: ToolCallEvent;
   tool_result: ToolResultEvent;
   context: ContextEvent;

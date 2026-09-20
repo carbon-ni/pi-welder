@@ -192,16 +192,16 @@ test("syncRuntimeConfig applies the live bash-routing gate without a restart", a
 
   assert.equal(runtime.bashRouteState.isEnabled(), false, "off by default");
 
-  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true });
+  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true, prospectiveLabelsEnabled: false });
   assert.equal(runtime.commandReroutingEnabled, true, "toggled live");
   assert.equal(runtime.bashRouteState.isEnabled(), true);
 
-  syncRuntimeConfig(runtime, { ...base, repairsEnabled: false, commandReroutingEnabled: true });
+  syncRuntimeConfig(runtime, { ...base, repairsEnabled: false, commandReroutingEnabled: true, prospectiveLabelsEnabled: false });
   assert.equal(runtime.bashRouteState.isEnabled(), false, "master repairs switch gates routing");
 
-  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true, disabledRepairs: ["route-to-bash"] });
+  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true, prospectiveLabelsEnabled: false, disabledRepairs: ["route-to-bash"] });
   assert.equal(runtime.bashRouteState.isEnabled(), false, "disabling the route-to-bash repair gates routing");
 
-  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true });
+  syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true, prospectiveLabelsEnabled: false });
   assert.equal(runtime.bashRouteState.isEnabled(), true, "re-enabling restores routing");
 });
