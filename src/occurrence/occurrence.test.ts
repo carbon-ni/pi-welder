@@ -60,15 +60,102 @@ test("occurrenceCount accepts only 2-5 reported occurrences", () => {
   assert.equal(positionBucketFor(3, 3), "last");
 });
 
+test("the success search is bounded to three following tool calls", () => {
+  const anchor = "  return value;";
+  const success = (suffix: string): OccurrenceEvent[] => [
+    { id: "c2", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "s1", path: "src/a.ts", oldText: "function beta() {\n  return value;\n}", newText: suffix },
+    { id: "r2", ts: "t", kind: "toolResult", toolCallId: "s1", toolName: "edit", isError: false },
+  ];
+  const padded = (count: number): OccurrenceEvent[] => Array.from({ length: count }, (_, index) => readCall(`p${index}`, "src/a.ts", SOURCE, 10 + index)).flat();
+
+  // Success as the third following call: labelable.
+  const withinBound: OccurrenceEvent[] = [ ...failedEdit("f1", "src/a.ts", anchor, "  return next;"), ...readCall("rd1", "src/a.ts", SOURCE, 1), ...padded(1), ...success("x") ];
+  assert.equal(extractOccurrenceEpisodes("s", withinBound).attrition.labelable, 1);
+
+  // Success as the fourth following call: out of bound, no label.
+  const afterBound: OccurrenceEvent[] = [ ...failedEdit("f1", "src/a.ts", anchor, "  return next;"), ...readCall("rd1", "src/a.ts", SOURCE, 1), ...padded(2), ...success("x") ];
+  assert.equal(extractOccurrenceEpisodes("s", afterBound).attrition.labelable, 0);
+
+  // A mutation before the success stops the search.
+  const mutated: OccurrenceEvent[] = [
+    ...failedEdit("f1", "src/a.ts", anchor, "  return next;"),
+    ...readCall("rd1", "src/a.ts", SOURCE, 1),
+    { id: "w", ts: "t", kind: "toolCall", toolName: "write", toolCallId: "w1", path: "src/a.ts" },
+    { id: "wr", ts: "t", kind: "toolResult", toolCallId: "w1", toolName: "write", isError: false },
+    ...success("x"),
+  ];
+  assert.equal(extractOccurrenceEpisodes("s", mutated).attrition.labelable, 0);
+});
+
+test("only a prior read of the same target supplies the recent-read relation", () => {
+  const anchor = "  return value;";
+  const success: OccurrenceEvent[] = [
+    { id: "c2", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "s1", path: "src/a.ts", oldText: "function beta() {\n  return value;\n}", newText: "x" },
+    { id: "r2", ts: "t", kind: "toolResult", toolCallId: "s1", toolName: "edit", isError: false },
+  ];
+  const otherTarget: OccurrenceEvent[] = [ ...readCall("ro", "src/other.ts", "unrelated", 0), ...failedEdit("f1", "src/a.ts", anchor, "  return next;"), ...readCall("rd1", "src/a.ts", SOURCE, 1), ...success ];
+  const sameTarget: OccurrenceEvent[] = [ ...readCall("ra", "src/a.ts", SOURCE, 0), ...failedEdit("f1", "src/a.ts", anchor, "  return next;"), ...readCall("rd1", "src/a.ts", SOURCE, 1), ...success ];
+
+  const unrelated = extractOccurrenceEpisodes("s", otherTarget).episodes[0]!;
+  assert.equal(unrelated.priorReadOffset, undefined, "unrelated prior read must not drive features or baseline");
+  const related = extractOccurrenceEpisodes("s", sameTarget).episodes[0]!;
+  assert.equal(related.priorReadOffset, 1);
+  assert.equal(related.priorReadLimit, 200);
+});
+
+test("the construction proof holds for an empty replacement", () => {
+  const anchor = "  return value;";
+  const candidates = buildOccurrenceCandidates(SOURCE, anchor, "");
+  assert.equal(candidates.length, 2);
+  for (const candidate of candidates) {
+    assert.deepEqual(proveConstruction(candidate, anchor, "", SOURCE), { exactlyOneOccurrenceChanges: true, untouchedContextIdentical: true, replacementNeverGenerated: true });
+    assert.equal(candidate.newText.length, candidate.oldText.length - anchor.length, "deletion removes only the anchor");
+    assert.equal(candidate.newText.includes(anchor), false);
+  }
+});
+
+test("the construction proof holds when the replacement also occurs in context", () => {
+  // Hand-built candidate: the untouched prefix also contains the replacement text,
+  // so an indexOf/split-based proof would report a false negative.
+  const source = "const value = 1;\nuse(value);\nuse(value);\n";
+  const anchor = "use(value);";
+  const replacement = "value";
+  const candidate = {
+    ordinal: 1,
+    oldText: "const value = 1;\nuse(value);",
+    newText: "const value = 1;\nvalue",
+    unique: true,
+    contextChars: 17,
+    contextBucket: "short" as const,
+    position: "first" as const,
+    startOffset: 17,
+    extensionStart: 0,
+    extensionEnd: 28,
+  };
+  assert.equal(candidate.newText.split(replacement).length > 2, true, "replacement text appears in context and as the swap-in");
+  assert.deepEqual(proveConstruction(candidate, anchor, replacement, source), { exactlyOneOccurrenceChanges: true, untouchedContextIdentical: true, replacementNeverGenerated: true });
+});
+
+test("overlapping anchors use non-overlapping stride semantics deterministically", () => {
+  const source = "ababa";
+  const anchor = "aba";
+  assert.deepEqual(occurrenceOffsets(source, anchor), [0], "stride is anchor length: overlapping matches are not double-counted");
+  const candidates = buildOccurrenceCandidates(source, anchor, "x");
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]!.unique, true);
+  assert.deepEqual(proveConstruction(candidates[0]!, anchor, "x", source), { exactlyOneOccurrenceChanges: true, untouchedContextIdentical: true, replacementNeverGenerated: true });
+  assert.deepEqual(buildOccurrenceCandidates(source, anchor, "x"), candidates);
+});
+
 test("labels the occurrence contained in the later successful anchor", () => {
   assert.equal(labelOccurrence(SOURCE, "  return value;", "function beta() {\n  return value;\n}"), 2);
   assert.equal(labelOccurrence(SOURCE, "  return value;", "function alpha() {\n  return value;\n}"), 1);
   assert.equal(labelOccurrence(SOURCE, "  return value;", "  return value;"), undefined, "success span does not separate occurrences");
 });
 
-function readCall(id: string, path: string, content: string, index = 0): OccurrenceEvent[] {
+function readCall(id: string, path: string, content: string, index = 0, offset = 1, limit = 200): OccurrenceEvent[] {
   return [
-    { id: `c${index}`, ts: "t", kind: "toolCall", toolName: "read", toolCallId: id, path },
+    { id: `c${index}`, ts: "t", kind: "toolCall", toolName: "read", toolCallId: id, path, offset, limit },
     { id: `r${index}`, ts: "t", kind: "toolResult", toolCallId: id, toolName: "read", isError: false, content },
   ];
 }

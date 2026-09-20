@@ -26,6 +26,9 @@ export interface OccurrenceCandidate {
   contextBucket: ContextLengthBucket;
   position: PositionBucket;
   startOffset: number;
+  /** Unique extension boundaries in the source; anchor-only when not unique. */
+  extensionStart: number;
+  extensionEnd: number;
 }
 
 export function occurrenceOffsets(source: string, anchor: string): number[] {
@@ -83,6 +86,8 @@ export function buildOccurrenceCandidates(source: string, anchor: string, replac
       contextBucket: contextBucketOf(prefix.length + suffix.length),
       position: positionBucket(index, offsets.length),
       startOffset: start,
+      extensionStart: extension ? extension.start : start,
+      extensionEnd: extension ? extension.end : end,
     };
   });
 }
@@ -94,22 +99,37 @@ export interface ConstructionProof {
 }
 
 /**
- * Proves a candidate is mutation-safe: exactly one occurrence changes, the
- * untouched prefix/suffix are byte-identical in anchor and replacement, and
- * the replacement is the caller's text (never generated).
+ * Proves a candidate is mutation-safe, exactly and offset-based:
+ * - exactly one occurrence of the extended anchor exists in the source;
+ * - the untouched prefix/suffix are byte-identical between anchor and
+ *   replacement text;
+ * - the only changed region is the caller's replacement text (never generated).
+ *
+ * Offset-based decomposition avoids `indexOf` ambiguity, so the proof stays
+ * exact for an empty replacement, a replacement that also occurs in context,
+ * and anchors that overlap themselves.
  */
 export function proveConstruction(candidate: OccurrenceCandidate, anchor: string, replacement: string, source: string): ConstructionProof {
-  const anchorAt = candidate.oldText.indexOf(anchor);
-  const replacementAt = candidate.newText.indexOf(replacement);
-  const exactlyOneOccurrenceChanges = anchorAt !== -1 && occurrenceOffsets(source, candidate.oldText).length === 1;
+  const extendedAt = occurrenceOffsets(source, candidate.oldText);
+  const anchorInSource = candidate.startOffset >= candidate.extensionStart
+    && candidate.startOffset + anchor.length <= candidate.extensionEnd
+    && source.slice(candidate.startOffset, candidate.startOffset + anchor.length) === anchor;
+  const exactlyOneOccurrenceChanges = extendedAt.length === 1
+    && candidate.extensionEnd - candidate.extensionStart === candidate.oldText.length
+    && source.slice(candidate.extensionStart, candidate.extensionEnd) === candidate.oldText
+    && anchorInSource;
 
-  const untouchedContextIdentical = anchorAt !== -1 && replacementAt !== -1
-    && candidate.oldText.slice(0, anchorAt) === candidate.newText.slice(0, replacementAt)
-    && candidate.oldText.slice(anchorAt + anchor.length) === candidate.newText.slice(replacementAt + replacement.length);
+  const anchorAt = candidate.startOffset - candidate.extensionStart;
+  const anchorFits = anchorInSource;
 
-  const replacementNeverGenerated = replacementAt !== -1
-    && candidate.newText.split(replacement).length === 2
-    && candidate.newText.replace(replacement, "") === candidate.oldText.replace(anchor, "");
+  const untouchedContextIdentical = anchorFits
+    && candidate.oldText.slice(0, anchorAt) === candidate.newText.slice(0, anchorAt)
+    && candidate.oldText.slice(anchorAt + anchor.length) === candidate.newText.slice(anchorAt + replacement.length);
+
+  const replacementNeverGenerated = anchorFits
+    && candidate.newText.slice(anchorAt, anchorAt + replacement.length) === replacement
+    && candidate.newText.slice(0, anchorAt) + candidate.newText.slice(anchorAt + replacement.length)
+      === candidate.oldText.slice(0, anchorAt) + candidate.oldText.slice(anchorAt + anchor.length);
 
   return { exactlyOneOccurrenceChanges, untouchedContextIdentical, replacementNeverGenerated };
 }

@@ -41,7 +41,7 @@ export interface OccurrenceEpisode {
   source: string;
   /** Hidden label: ordinal of the occurrence the later success targeted. */
   labelOrdinal?: number;
-  /** Prior read range (structural) for the nearest-read baseline. */
+  /** Prior read range of the SAME target (structural) for the nearest-read baseline. */
   priorReadOffset?: number;
   priorReadLimit?: number;
 }
@@ -85,18 +85,26 @@ function reconstructSource(events: readonly OccurrenceEvent[], failureIndex: num
   return undefined;
 }
 
-/** Finds the successful same-path edit within the bounded call window. */
+/**
+ * Finds the successful same-path edit within the bounded call window
+ * (max three following tool calls). Any user event, mutation (`write`), or
+ * edit of a different target stops the search. A failed same-path edit still
+ * consumes a call from the budget.
+ */
 function findSuccess(events: readonly OccurrenceEvent[], failureIndex: number, path: string): OccurrenceEvent | undefined {
   const results = resultByCall(events);
+  let callsSeen = 0;
   for (let index = failureIndex + 1; index < events.length; index++) {
     const event = events[index]!;
     if (event.kind === "user") return undefined;
     if (event.kind !== "toolCall") continue;
+    callsSeen++;
+    if (callsSeen > FOLLOWING_CALL_WINDOW) return undefined;
     const result = typeof event.toolCallId === "string" ? results.get(event.toolCallId) : undefined;
-    if (result === undefined || result.isError === true) continue;
     if (event.toolName === "write") return undefined;
     if (event.toolName !== "edit") continue;
     if (event.path !== path) return undefined;
+    if (result === undefined || result.isError === true) continue;
     if (typeof event.oldText === "string" && event.oldText.length > 0) return event;
     return undefined;
   }
@@ -131,6 +139,7 @@ export function extractOccurrenceEpisodes(sessionId: string, events: readonly Oc
   const attrition: OccurrenceAttrition = { mined: 0, occurrencesEligible: 0, sourceReconstructed: 0, candidatesBuilt: 0, locatorExtensions: 0, labelable: 0 };
   let priorReadOffset: number | undefined;
   let priorReadLimit: number | undefined;
+  let priorReadPath: string | undefined;
 
   for (let index = 0; index < events.length; index++) {
     const call = events[index]!;
@@ -140,6 +149,7 @@ export function extractOccurrenceEpisodes(sessionId: string, events: readonly Oc
     if (call.toolName === "read" && result?.isError === false) {
       priorReadOffset = typeof call.offset === "number" ? call.offset : undefined;
       priorReadLimit = typeof call.limit === "number" ? call.limit : undefined;
+      priorReadPath = call.path;
       continue;
     }
     if (call.toolName !== "edit" || result?.isError !== true) continue;
@@ -163,6 +173,8 @@ export function extractOccurrenceEpisodes(sessionId: string, events: readonly Oc
     if (labelOrdinal === undefined) continue;
     attrition.labelable++;
 
+    // The recent-read relation is only meaningful for a read of the same target.
+    const readMatchesTarget = priorReadPath === call.path && priorReadOffset !== undefined;
     episodes.push({
       episodeId: `${sessionId}#${call.toolCallId ?? call.id}`,
       sessionId,
@@ -171,8 +183,7 @@ export function extractOccurrenceEpisodes(sessionId: string, events: readonly Oc
       occurrences: occurrences.length,
       source,
       labelOrdinal,
-      ...(priorReadOffset === undefined ? {} : { priorReadOffset }),
-      ...(priorReadLimit === undefined ? {} : { priorReadLimit }),
+      ...(readMatchesTarget ? { priorReadOffset, ...(priorReadLimit === undefined ? {} : { priorReadLimit }) } : {}),
     });
   }
   return { episodes, attrition };

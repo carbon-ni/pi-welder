@@ -11,6 +11,7 @@
  *   node --experimental-strip-types scripts/occurrence-eval.ts run [--sessions <dir>] [--out <dir>] [--budget <n>] [--no-jeq]
  */
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { homedir } from "node:os";
 import * as path from "node:path";
@@ -145,15 +146,23 @@ function featuresFor(episode: OccurrenceEpisode, candidates: readonly Occurrence
 
 interface PreparedCase { episode: OccurrenceEpisode; candidates: OccurrenceCandidate[]; features: OccurrenceFeatures[]; options: string[]; request: string; baselineNearest?: number }
 
-async function collect(sessionsDir: string): Promise<{ sessions: number; attrition: Record<string, number>; cases: PreparedCase[] }> {
+/** Frozen-corpus fingerprint: path + size + mtime, so reruns can explain drift. */
+interface CorpusSnapshot { root: string; algorithm: string; files: number; bytes: number; hash: string; fingerprint: { file: string; size: number; mtimeMs: number }[] }
+
+async function collect(sessionsDir: string): Promise<{ sessions: number; attrition: Record<string, number>; cases: PreparedCase[]; corpus: CorpusSnapshot }> {
   const entries = await fs.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
   let sessions = 0;
   const total = { mined: 0, occurrencesEligible: 0, sourceReconstructed: 0, candidatesBuilt: 0, locatorExtensions: 0, labelable: 0 };
   const cases: PreparedCase[] = [];
+  const fingerprint: CorpusSnapshot["fingerprint"] = [];
   for (const dir of entries.filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const dirPath = path.join(sessionsDir, dir.name);
     for (const file of (await fs.readdir(dirPath).catch(() => [])).filter((name) => name.endsWith(".jsonl")).sort()) {
-      const text = await fs.readFile(path.join(dirPath, file), "utf8").catch(() => undefined);
+      const fullPath = path.join(dirPath, file);
+      const stat = await fs.stat(fullPath).catch(() => undefined);
+      if (stat === undefined) continue;
+      fingerprint.push({ file: path.relative(sessionsDir, fullPath), size: stat.size, mtimeMs: Math.round(stat.mtimeMs) });
+      const text = await fs.readFile(fullPath, "utf8").catch(() => undefined);
       if (text === undefined) continue;
       const session = parseSessionText(text);
       if (!session.sessionId) continue;
@@ -176,7 +185,19 @@ async function collect(sessionsDir: string): Promise<{ sessions: number; attriti
       }
     }
   }
-  return { sessions, attrition: total, cases };
+  fingerprint.sort((a, b) => a.file.localeCompare(b.file));
+  const digest = createHash("sha256");
+  for (const entry of fingerprint) digest.update(`${entry.file}\0${entry.size}\0${entry.mtimeMs}\n`);
+  const corpus: CorpusSnapshot = {
+    // Home-relative: the report and snapshot must not carry absolute user paths.
+    root: sessionsDir.startsWith(homedir()) ? `~${sessionsDir.slice(homedir().length)}` : path.basename(sessionsDir),
+    algorithm: "sha256(relativePath\0size\0mtimeMs)",
+    files: fingerprint.length,
+    bytes: fingerprint.reduce((sum, entry) => sum + entry.size, 0),
+    hash: digest.digest("hex"),
+    fingerprint,
+  };
+  return { sessions, attrition: total, cases, corpus };
 }
 
 /** Request privacy gate: closed features only. */
@@ -185,38 +206,72 @@ export function occurrenceRequestPrivacyPasses(requests: readonly string[]): boo
   return requests.every((request) => forbidden.every((pattern) => !pattern.test(request)));
 }
 
-async function runJeq(cases: readonly PreparedCase[], outDir: string, budget: number): Promise<OccurrenceResult[]> {
+/** Privacy-safe per-case audit: choices, probabilities, expected label, features. No source or text. */
+interface AuditRecord {
+  caseId: string;
+  sessionId: string;
+  requestRef: string;
+  expectedOrdinal: number;
+  features: OccurrenceFeatures[];
+  status: OccurrenceResult["status"];
+  choice?: string;
+  confidence?: number;
+  probabilities?: Record<string, number>;
+  latencyMs: number;
+}
+
+async function runJeq(cases: readonly PreparedCase[], outDir: string, budget: number): Promise<{ results: OccurrenceResult[]; audit: AuditRecord[] }> {
   const requestDir = path.join(outDir, "requests");
   await fs.mkdir(requestDir, { recursive: true });
   const results: OccurrenceResult[] = [];
+  const audit: AuditRecord[] = [];
   for (const [index, entry] of cases.slice(0, budget).entries()) {
     const requestFile = path.join(requestDir, `${String(index).padStart(3, "0")}.json`);
     await fs.writeFile(requestFile, entry.request);
+    const requestRef = path.relative(outDir, requestFile);
+    const base = { caseId: entry.episode.episodeId, sessionId: entry.episode.sessionId, requestRef, expectedOrdinal: entry.episode.labelOrdinal!, features: entry.features };
     const started = Date.now();
     try {
       const { stdout } = await execFileAsync(JEQ_BIN, ["ask", "--request", requestFile, "--max-retries", "0"], { maxBuffer: 1_000_000, timeout: 30_000 });
       const response = parseOccurrenceResponse(stdout, entry.options);
       if (!response) {
-        results.push({ caseId: entry.episode.episodeId, sessionId: entry.episode.sessionId, status: "malformed", latencyMs: Date.now() - started });
+        const latencyMs = Date.now() - started;
+        results.push({ caseId: entry.episode.episodeId, sessionId: entry.episode.sessionId, status: "malformed", latencyMs });
+        audit.push({ ...base, status: "malformed", latencyMs });
         continue;
       }
+      const status: OccurrenceResult["status"] = response.choice === "none" ? "abstained" : "answered";
+      const latencyMs = Date.now() - started;
       results.push({
         caseId: entry.episode.episodeId,
         sessionId: entry.episode.sessionId,
-        status: response.choice === "none" ? "abstained" : "answered",
+        status,
         choice: response.choice,
         ...(response.confidence === undefined ? {} : { confidence: response.confidence }),
-        latencyMs: Date.now() - started,
+        latencyMs,
+      });
+      audit.push({
+        ...base,
+        status,
+        choice: response.choice,
+        ...(response.confidence === undefined ? {} : { confidence: response.confidence }),
+        probabilities: response.probabilities,
+        latencyMs,
       });
     } catch {
-      results.push({ caseId: entry.episode.episodeId, sessionId: entry.episode.sessionId, status: "failed", latencyMs: Date.now() - started });
+      const latencyMs = Date.now() - started;
+      results.push({ caseId: entry.episode.episodeId, sessionId: entry.episode.sessionId, status: "failed", latencyMs });
+      audit.push({ ...base, status: "failed", latencyMs });
     }
   }
-  return results;
+  await fs.writeFile(path.join(outDir, "audit.jsonl"), audit.map((record) => JSON.stringify(record)).join("\n") + (audit.length ? "\n" : ""));
+  return { results, audit };
 }
 
 async function commandRun(args: Args): Promise<void> {
-  const { sessions, attrition, cases } = await collect(args.sessions);
+  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  const { sessions, attrition, cases, corpus } = await collect(args.sessions);
   const labelable: LabelableCase[] = cases.map((entry) => ({
     caseId: entry.episode.episodeId,
     sessionId: entry.episode.sessionId,
@@ -236,16 +291,19 @@ async function commandRun(args: Args): Promise<void> {
     coverage,
     distinctSessions: new Set(labelable.map((entry) => entry.sessionId)).size,
     requestPrivacyPass: privacyPass,
+    corpus: { root: corpus.root, algorithm: corpus.algorithm, files: corpus.files, bytes: corpus.bytes, hash: corpus.hash },
+    reproducibility: "Live session directory: reruns may drift. Compare corpus.hash; snapshot.json lists per-file path/size/mtime. Jev sampling is nondeterministic, so reruns can change attempted/abstained counts.",
     gate: OCCURRENCE_PROMOTION_GATE,
   };
 
   const shouldRun = args.jeq && labelable.length >= MIN_LABELABLE && privacyPass;
   if (shouldRun) {
-    const results = await runJeq(cases, args.out, args.budget);
+    const { results, audit } = await runJeq(cases, args.out, args.budget);
     const metrics = evaluateOccurrences(labelable, results);
     report.metrics = metrics;
     report.verdict = decideOccurrences(coverage, metrics, labelable.length);
     report.evaluated = results.length;
+    report.audit = { path: path.join(args.out, "audit.jsonl"), cases: audit.length };
   } else {
     report.evaluated = 0;
     report.verdict = !privacyPass
@@ -255,8 +313,11 @@ async function commandRun(args: Args): Promise<void> {
         : { verdict: "shadow-only", reason: "jeq not run in this invocation" };
   }
 
+  report.run = { startedAt, durationMs: Date.now() - startedMs, budget: args.budget, retries: 0, jeq: JEQ_BIN, jeqRan: shouldRun };
+
   await fs.mkdir(args.out, { recursive: true });
   await fs.writeFile(path.join(args.out, "report.json"), JSON.stringify(report, null, 2) + "\n");
+  await fs.writeFile(path.join(args.out, "snapshot.json"), JSON.stringify(corpus, null, 2) + "\n");
   console.log(JSON.stringify(report, null, 2));
 }
 
