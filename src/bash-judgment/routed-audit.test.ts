@@ -11,7 +11,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import factory from "../index.ts";
+import type { ExtensionHost } from "../infra/pi/contracts.ts";
 
 interface Captured {
   handlers: Record<string, (event: any, ctx: any) => Promise<unknown> | unknown>;
@@ -19,7 +19,36 @@ interface Captured {
   tools: Array<{ name: string; prepareArguments?: (args: unknown) => unknown; execute: (...args: any[]) => Promise<any> }>;
 }
 
-function loadExtension(): Captured {
+/**
+ * The composition root reads the developer's real `~/.pi/agent/welder.json`, so
+ * these tests run against a throwaway HOME with routing explicitly enabled.
+ * They must never depend on local settings.
+ */
+let factoryPromise: Promise<(pi: ExtensionHost) => void> | undefined;
+
+async function loadFactory(): Promise<(pi: ExtensionHost) => void> {
+  if (factoryPromise === undefined) {
+    factoryPromise = (async () => {
+      const home = await fs.mkdtemp(path.join(os.tmpdir(), "welder-home-"));
+      const agentDir = path.join(home, ".pi", "agent");
+      await fs.mkdir(agentDir, { recursive: true });
+      await fs.writeFile(path.join(agentDir, "welder.json"), JSON.stringify({ repairsEnabled: true, commandReroutingEnabled: true }));
+
+      const previousHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        const module = await import("../index.ts");
+        return module.default as (pi: ExtensionHost) => void;
+      } finally {
+        process.env.HOME = previousHome;
+      }
+    })();
+  }
+  return factoryPromise;
+}
+
+async function loadExtension(): Promise<Captured> {
+  const factory = await loadFactory();
   const captured: Captured = { handlers: {}, commands: {}, tools: [] };
   const api = {
     on(event: string, handler: any) { captured.handlers[event] = handler; },
@@ -70,7 +99,7 @@ async function withExtension(
   }) as unknown as typeof fetch;
 
   try {
-    const captured = loadExtension();
+    const captured = await loadExtension();
     const write = captured.tools.find((tool) => tool.name === "write");
     assert.ok(write, "the write tool is registered");
 

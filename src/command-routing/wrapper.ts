@@ -95,6 +95,42 @@ function rememberToken(state: BashRouteState, token: string, command: StoredRout
   }
 }
 
+/**
+ * Returns true when the args satisfy the built-in's own TypeBox schema, using
+ * the JSON Schema shape Pi's `Type.Object` emits.
+ *
+ * Only an object schema with a recognizable `properties` map counts: anything
+ * else is unknown and never bypasses classification. Extras are left to Pi to
+ * judge, so a plausible call always takes the native path — the safe direction.
+ */
+export function preparedArgumentsMatchSchema(parameters: unknown, args: unknown): boolean {
+  if (!parameters || typeof parameters !== "object") return false;
+  const schema = parameters as { type?: unknown; required?: unknown; properties?: unknown };
+  if (schema.type !== "object") return false;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+
+  const properties = (schema.properties && typeof schema.properties === "object" ? schema.properties : {}) as Record<string, unknown>;
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  for (const key of required) {
+    if (typeof key !== "string" || !(key in (args as Record<string, unknown>))) return false;
+  }
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    const property = properties[key];
+    if (!property || typeof property !== "object") continue;
+    if (!valueMatchesType((property as { type?: unknown }).type, value)) return false;
+  }
+  return true;
+}
+
+function valueMatchesType(type: unknown, value: unknown): boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "array") return Array.isArray(value);
+  return true;
+}
+
 /** Schema-valid stand-in for the routed call. Contains no command text. */
 export function sentinelArguments(toolName: RouteToolName, token: string): Record<string, unknown> {
   const path = `${ROUTE_SENTINEL_PREFIX}${token}`;
@@ -206,6 +242,9 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
       if (!state.isEnabled() || !state.isTrusted()) return prepared;
       const call = recognizeBashShapedCall(toolName, args);
       if (!call) {
+        // TASK-0040: a call the built-in's own schema accepts is a normal call.
+        // It must never be classified, tokenized, or refused: native execution.
+        if (preparedArgumentsMatchSchema(builtin.parameters, prepared)) return prepared;
         // TASK-0038: non-exact shape, classified before any execution.
         if (options.judgeBash === undefined) return prepared;
         const eligibility = judgeEligibility(args);
