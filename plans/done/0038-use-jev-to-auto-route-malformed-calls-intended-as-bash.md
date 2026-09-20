@@ -1,7 +1,7 @@
 ---
 id: TASK-0038
 title: Use Jev to auto-route malformed calls intended as Bash
-status: doing
+status: done
 depends_on: [TASK-0034]
 priority: high
 tags: [jev, bash, routing, auto-repair, typesafe]
