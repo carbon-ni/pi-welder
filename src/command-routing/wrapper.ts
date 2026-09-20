@@ -12,6 +12,8 @@
  */
 
 import { recognizeBashShapedCall } from "./gate.ts";
+import { BASH_JUDGMENT_MAX_MS, parseBashJudgment, type BashJudgmentClient } from "../bash-judgment/contract.ts";
+import { judgeEligibility } from "../bash-judgment/eligibility.ts";
 
 export const ROUTE_SENTINEL_PREFIX = "pi-welder-route:";
 /** Bounded count, total payload, and per-command payload. */
@@ -24,6 +26,8 @@ export type RouteToolName = "read" | "write" | "edit";
 export interface StoredRouteCommand {
   /** The wrapper that prepared this token; a mismatch fails closed. */
   sourceTool: RouteToolName;
+  /** Set when the token came from Jev-judged non-exact eligibility. */
+  judgment?: { key: string };
   /** Policy epoch at preparation time; a bump makes the token unrouteable. */
   epoch: number;
   command: string;
@@ -148,6 +152,9 @@ export interface ToolLike {
 }
 
 interface WrapOptions {
+  /** TASK-0038 dedicated classifier (see above). */
+  judgeBash?: BashJudgmentClient;
+  judgmentTimeoutMs?: number;
   builtin: ToolLike;
   toolName: RouteToolName;
   state: BashRouteState;
@@ -196,7 +203,21 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
       const prepared = builtinPrepare ? builtinPrepare(args) : args;
       if (!state.isEnabled() || !state.isTrusted()) return prepared;
       const call = recognizeBashShapedCall(toolName, args);
-      if (!call) return prepared;
+      if (!call) {
+        // TASK-0038: non-exact shape, classified before any execution.
+        if (options.judgeBash === undefined) return prepared;
+        const eligibility = judgeEligibility(args);
+        if (!eligibility.eligible || eligibility.candidate === undefined) return prepared;
+        const judgedToken = nextToken();
+        rememberToken(state, judgedToken, {
+          sourceTool: toolName,
+          epoch: state.epoch,
+          command: eligibility.candidate.candidate,
+          ...(eligibility.candidate.timeout === undefined ? {} : { timeout: eligibility.candidate.timeout }),
+          judgment: { key: eligibility.candidate.key },
+        });
+        return sentinelArguments(toolName, judgedToken);
+      }
       // Oversized commands stay native: no token, no routing.
       if (commandBytes(call.command) > MAX_COMMAND_BYTES) return prepared;
       const token = nextToken();
@@ -215,6 +236,17 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
         if (stored === undefined) throwRouteRefusal(toolName, "unknown or expired token");
         if (stored.epoch !== state.epoch) throwRouteRefusal(toolName, "token expired by a policy change");
         if (stored.sourceTool !== toolName) throwRouteRefusal(toolName, "token belongs to another tool");
+        if (stored.judgment !== undefined) {
+          // Live recheck happens before the model call and again before execution.
+          if (signal?.aborted === true) throwRouteRefusal(toolName, "aborted before classification");
+          if (ctx?.isProjectTrusted?.() !== true) throwRouteRefusal(toolName, "untrusted project");
+          const verdict = await judgeWithDeadline(options, {
+            attemptedTool: toolName,
+            key: stored.judgment.key,
+            candidate: stored.command,
+          }, signal);
+          if (verdict !== "bash") throwRouteRefusal(toolName, "classified as not-bash");
+        }
         if (ctx?.isProjectTrusted?.() !== true) throwRouteRefusal(toolName, "untrusted project");
         onRouted?.({ sourceTool: toolName, targetTool: "bash", toolCallId }, ctx);
         try {
@@ -257,6 +289,29 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
       return resolved.renderResult?.(result, renderOptions, theme, context) ?? noticeComponent([toolName]);
     },
   };
+}
+
+/**
+ * Runs the dedicated classifier with a strict deadline and zero retry. Any
+ * failure — malformed answer, unavailable client, timeout, or abort — returns
+ * `not-bash`, so the caller fails closed and never executes.
+ */
+async function judgeWithDeadline(
+  options: WrapOptions,
+  request: { attemptedTool: string; key: string; candidate: string },
+  signal: AbortSignal | undefined,
+): Promise<"bash" | "not-bash"> {
+  const client = options.judgeBash;
+  if (client === undefined) return "not-bash";
+  const timeoutMs = options.judgmentTimeoutMs ?? BASH_JUDGMENT_MAX_MS;
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const combined = signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
+  try {
+    const raw = await client.judge(request, combined);
+    return parseBashJudgment(raw)?.verdict ?? "not-bash";
+  } catch {
+    return "not-bash";
+  }
 }
 
 /**
