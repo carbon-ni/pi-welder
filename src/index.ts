@@ -88,11 +88,12 @@ export default function (pi: ExtensionHost) {
       onRouted: (audit, ctx) => {
         // Audit carries the source and target tool names only: never the command.
         const context = ctx as WelderContext;
+        // Exactly one repair, counted once. `classified` — never a duplicate
+        // action — is what tells a Jev route from a deterministic one.
         const repairs: Repair[] = [{ field: "input", action: "route-to-bash" }];
         runtime.stats.totalToolCalls++;
-        if (audit.classified === true) {
-          repairs.push({ field: "input", action: "route-to-bash" });
-          if (context.hasUI) context.ui.setStatus("welder", `🔧 ${audit.sourceTool}: route-to-bash (jev-classified)`);
+        if (audit.classified === true && context.hasUI) {
+          context.ui.setStatus("welder", `🔧 ${audit.sourceTool}: route-to-bash (jev-classified)`);
         }
         recordRepairs(runtime.stats, repairs);
         recordRepairWarnings(runtime.repairWarnings, repairs, audit.sourceTool);

@@ -47,6 +47,8 @@ export function createTypeSafeBashJudgeClient(options: BashJudgeClientOptions): 
           },
         }),
         signal: combined,
+        // Never follow a redirect: the key must not travel to another origin.
+        redirect: "error",
       });
       if (!response.ok) throw new Error(`bash judge failed: ${response.status}`);
       return response.json();
