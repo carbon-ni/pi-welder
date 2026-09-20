@@ -31,6 +31,7 @@ import {
   handleSessionShutdown,
   handleSessionStart,
   handleToolCall,
+  handleProspectiveLabelClosure,
   handleToolExecutionEnd,
   handleToolExecutionStart,
   handleToolResult,
@@ -111,7 +112,8 @@ export default function (pi: ExtensionHost) {
   // TASK-0037: local-only prospective labels. `tool_execution_start` carries the
   // pre-validation arguments; `tool_execution_end` confirms a validation failure.
   pi.on("tool_execution_start", async (event) => handleToolExecutionStart(runtime, event));
-  pi.on("tool_execution_end", async (event) => handleToolExecutionEnd(runtime, event));
+  pi.on("tool_execution_end", async (event, ctx) => handleToolExecutionEnd(runtime, event, ctx));
+  pi.on("turn_end", async (_event, ctx) => handleProspectiveLabelClosure(runtime, "expired", ctx));
 
   pi.on("tool_call", async (event, ctx) => handleToolCall(runtime, event, ctx));
 

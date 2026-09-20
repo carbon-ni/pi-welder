@@ -171,10 +171,6 @@ export async function handleToolCall(
 
   observeAndMaybeSubmitShadow(runtime, event, ctx, input as Record<string, unknown>);
 
-  // TASK-0037: a `tool_call` event only fires after validation passed, so this
-  // is the corrected-call observation point for a pending episode.
-  await handleToolExecutionSuccess(runtime, { toolName: event.toolName, args: input }, ctx).catch(() => undefined);
-
   runtime.episodes.observeCall({ toolName: event.toolName, actions: callActions });
   return undefined;
 }
@@ -355,26 +351,31 @@ export function handleToolExecutionStart(runtime: WelderRuntime, event: { toolCa
 
 export function handleToolExecutionEnd(
   runtime: WelderRuntime,
-  event: { toolCallId: string; toolName: string; isError: boolean; result?: unknown },
+  event: { toolCallId: string; toolName: string; isError: boolean; result?: unknown; args?: unknown },
+  ctx?: WelderContext,
 ): void {
-  runtime.prospectiveLabels?.onToolEnd({
+  const failureText = errorTextOf(event.result);
+  const records = runtime.prospectiveLabels?.onToolEnd({
     toolCallId: event.toolCallId,
     toolName: event.toolName,
     isError: event.isError,
-    ...(errorTextOf(event.result) === undefined ? {} : { errorText: errorTextOf(event.result) }),
-  });
+    args: event.args,
+    ...(failureText === undefined ? {} : { errorText: failureText }),
+  }) ?? [];
+  for (const record of records) if (ctx) void persistLabelRecord(ctx, record).catch(() => { /* logging never breaks tool flow */ });
 }
 
-/** Successful call observation: may label a pending episode. */
-export async function handleToolExecutionSuccess(
+/**
+ * TASK-0037: unresolved episodes are closed and persisted on turn end or user
+ * interruption, so an interrupted window leaves evidence instead of vanishing.
+ */
+export async function handleProspectiveLabelClosure(
   runtime: WelderRuntime,
-  event: { toolName: string; args: unknown },
-  ctx?: WelderContext,
-): Promise<LabelRecord | undefined> {
-  const record = runtime.prospectiveLabels?.onToolSuccess(event.toolName, event.args, Date.now());
-  if (!record || !ctx) return record;
-  await persistLabelRecord(ctx, record);
-  return record;
+  reason: "expired" | "interrupted",
+  ctx: WelderContext,
+): Promise<void> {
+  const records = runtime.prospectiveLabels?.closeUnresolved(reason) ?? [];
+  for (const record of records) await persistLabelRecord(ctx, record);
 }
 
 function errorTextOf(result: unknown): string | undefined {

@@ -21,28 +21,35 @@ test("opens an episode only after an anchored Pi validation failure", () => {
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
   assert.equal(instance.pendingCount(), 0, "no episode before confirmation");
 
-  // A successful or non-anchored end never opens an episode.
-  instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: false });
-  instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: "ENOENT" });
-  instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: 'Validation failed for tool "edit":' });
-  assert.equal(instance.pendingCount(), 0);
+  // Each end consumes its start, so negative cases use their own call IDs.
+  for (const [id, isError, errorText] of [
+    ["n1", false, undefined],
+    ["n2", true, "ENOENT"],
+    ["n3", true, 'Validation failed for tool "edit":'],
+  ] as const) {
+    instance.onToolStart({ toolCallId: id, toolName: "write", args: { execute: "git status" } });
+    instance.onToolEnd({ toolCallId: id, toolName: "write", isError, ...(errorText === undefined ? {} : { errorText }) });
+  }
+  assert.equal(instance.pendingCount(), 0, "no episode from success, unrelated errors, or a mismatched header");
 
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
   assert.equal(instance.pendingCount(), 1, "episode opens on the matching anchored failure");
   assert.equal(instance.stats().validationFailures, 1);
 });
 
-test("labels a later exact plan match with unchanged values inside three calls", () => {
+test("labels only on a correlated successful tool_execution_end", () => {
   const { instance, labels } = collector();
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
 
   instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "git status", timeout: 30 } });
-  const record = instance.onToolSuccess("bash", { command: "git status", timeout: 30 }, 1_000);
+  assert.equal(instance.pendingCount(), 1, "no label before the call finishes");
+  const records = instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
 
-  assert.ok(record);
-  assert.equal(record!.targetTool, "bash");
-  assert.ok(record!.pairs.includes("command<-execute"));
+  assert.equal(records.length, 1);
+  assert.equal(records[0]!.outcome, "labelled");
+  assert.equal(records[0]!.targetTool, "bash");
+  assert.ok(records[0]!.pairs.includes("command<-execute"));
   assert.equal(instance.pendingCount(), 0, "the episode is consumed");
   assert.equal(labels.length, 1);
 
@@ -50,8 +57,43 @@ test("labels a later exact plan match with unchanged values inside three calls",
   instance.onToolStart({ toolCallId: "d1", toolName: "write", args: { execute: "git status" } });
   instance.onToolEnd({ toolCallId: "d1", toolName: "write", isError: true, errorText: validation("write") });
   instance.onToolStart({ toolCallId: "d2", toolName: "bash", args: { command: "git diff" } });
-  assert.equal(instance.onToolSuccess("bash", { command: "git diff" }, 2_000), undefined);
+  assert.deepEqual(instance.onToolEnd({ toolCallId: "d2", toolName: "bash", isError: false }, 2_000), []);
   assert.equal(instance.pendingCount(), 1, "no label for a changed value");
+});
+
+test("a failed, timed-out, aborted, or blocked corrected call consumes the window without labelling", () => {
+  for (const label of ["failed", "timeout", "abort", "blocked"]) {
+    const { instance, labels } = collector();
+    instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
+    instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
+    instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "git status" } });
+    // The call ends in error: no label, window consumed.
+    assert.deepEqual(instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: true, errorText: `${label} failure` }), []);
+    assert.equal(labels.length, 0, label);
+    // Its success late cannot relabel the same episode either (already past).
+    assert.deepEqual(instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }), [], label);
+    assert.equal(labels.length, 0, label);
+  }
+});
+
+test("unresolved episodes are persisted on turn end or interruption", () => {
+  const { instance, labels } = collector();
+  instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
+  instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
+
+  const expired = instance.closeUnresolved("expired", 5_000);
+  assert.equal(expired.length, 1);
+  assert.equal(expired[0]!.outcome, "expired");
+  assert.equal(expired[0]!.targetTool, undefined);
+  assert.equal(instance.pendingCount(), 0);
+  assert.equal(instance.stats().expired, 1);
+
+  instance.onToolStart({ toolCallId: "c2", toolName: "write", args: { execute: "git status" } });
+  instance.onToolEnd({ toolCallId: "c2", toolName: "write", isError: true, errorText: validation("write") });
+  const interrupted = instance.closeUnresolved("interrupted", 6_000);
+  assert.equal(interrupted[0]!.outcome, "interrupted");
+  assert.equal(instance.stats().interrupted, 1);
+  assert.equal(labels.length, 2, "unresolved outcomes are persisted, not dropped");
 });
 
 test("excludes earlier parallel siblings and expires beyond the window", () => {
@@ -61,18 +103,18 @@ test("excludes earlier parallel siblings and expires beyond the window", () => {
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "git status" } });
   instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "git status" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
-  assert.equal(instance.onToolSuccess("bash", { command: "git status" }, 1_000), undefined, "earlier sibling cannot label");
+  assert.deepEqual(instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000), [], "earlier sibling cannot label");
 
-  // A later sibling that starts after confirmation labels normally.
+  // A later call that starts after confirmation labels normally.
   instance.onToolStart({ toolCallId: "c3", toolName: "bash", args: { command: "git status" } });
-  assert.ok(instance.onToolSuccess("bash", { command: "git status" }, 2_000));
+  assert.equal(instance.onToolEnd({ toolCallId: "c3", toolName: "bash", isError: false }, 2_000).length, 1);
 
-  // Beyond three following calls the episode expires.
+  // Beyond three following calls the episode expires, including invalid starts.
   instance.onToolStart({ toolCallId: "e1", toolName: "write", args: { execute: "git status" } });
   instance.onToolEnd({ toolCallId: "e1", toolName: "write", isError: true, errorText: validation("write") });
-  for (const id of ["f1", "f2", "f3", "f4"]) instance.onToolStart({ toolCallId: id, toolName: "read", args: { path: id } });
+  for (const id of ["f1", "f2", "f3", "f4"]) instance.onToolStart({ toolCallId: id, toolName: "write", args: { execute: "git status" } });
   assert.equal(instance.pendingCount(), 0, "expired outside the window");
-  assert.equal(instance.onToolSuccess("bash", { command: "git status" }, 3_000), undefined);
+  assert.equal(instance.onToolEnd({ toolCallId: "f4", toolName: "bash", isError: false }, 3_000).length, 0);
 });
 
 test("stays inert when disabled, keeps memory bounded, and clears on cleanup", () => {
@@ -91,6 +133,14 @@ test("stays inert when disabled, keeps memory bounded, and clears on cleanup", (
   assert.ok(bounded.instance.pendingCount() <= 8, `bounded pending, got ${bounded.instance.pendingCount()}`);
   assert.ok(bounded.instance.stats().expired > 0, "eviction is counted");
 
+  // Raw retention is bounded by count and bytes, and end removes entries.
+  const raw = collector();
+  for (let index = 0; index < 60; index++) raw.instance.onToolStart({ toolCallId: `r${index}`, toolName: "write", args: { execute: `cmd ${index}` } });
+  assert.ok(raw.instance.stats().retainedRawBytes <= 65_536, `byte cap, got ${raw.instance.stats().retainedRawBytes}`);
+  assert.ok(raw.instance.stats().evictedStarts > 0, "start eviction is accounted");
+  raw.instance.onToolStart({ toolCallId: "big", toolName: "write", args: { execute: "x".repeat(20_000) } });
+  assert.equal(raw.instance.stats().oversizedStarts, 1, "oversized raw args are never retained");
+
   bounded.instance.clear();
   assert.equal(bounded.instance.pendingCount(), 0);
 });
@@ -100,7 +150,7 @@ test("records are privacy-safe and the writer rejects oversized or multiline lin
   instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "SECRET_COMMAND --flag /Users/me/x" } });
   instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
   instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "SECRET_COMMAND --flag /Users/me/x" } });
-  instance.onToolSuccess("bash", { command: "SECRET_COMMAND --flag /Users/me/x" }, 1_000);
+  instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
 
   const record = labels[0]!;
   const rendered = renderLabelRecord(record);
@@ -108,6 +158,9 @@ test("records are privacy-safe and the writer rejects oversized or multiline lin
     assert.equal(rendered.includes(forbidden), false, `record leaked ${forbidden}`);
   }
   assert.equal(labelRecordIsPrivacySafe(record), true);
+  assert.equal(record.outcome, "labelled");
+  assert.ok(record.request, "the closed judge-input snapshot is persisted for replay");
+  assert.equal(JSON.stringify(record.request).includes("SECRET_COMMAND"), false);
   assert.equal(labelRecordIsPrivacySafe({ ...record, sourceTool: "bad tool!" }), false);
 
   const written: string[] = [];

@@ -13,28 +13,38 @@
  */
 
 import { planMappings, type MappingPlan } from "../tool-mapping/planner.ts";
+import { buildToolMappingRequest } from "../tool-mapping/evaluation.ts";
 import { TOOL_CONTRACTS } from "../tool-routing/contracts.ts";
 import { planMatchesCall } from "../tool-mapping/episode.ts";
 
 export const FOLLOWING_CALL_WINDOW = 3;
 export const MAX_PENDING_EPISODES = 8;
+/** Bounded raw-argument retention. Eviction is fail-closed and accounted. */
 export const MAX_OBSERVED_CALLS = 32;
+export const MAX_RAW_ARG_BYTES = 8_192;
+export const MAX_TOTAL_RAW_BYTES = 65_536;
 
 const PI_VALIDATION_HEADER = /^\s*Validation failed for tool "([A-Za-z0-9_.-]{1,60})":/;
 
 export interface ToolStart { toolCallId: string; toolName: string; args: unknown }
-export interface ToolEnd { toolCallId: string; toolName: string; isError: boolean; errorText?: string }
+export interface ToolEnd { toolCallId: string; toolName: string; isError: boolean; errorText?: string; args?: unknown }
+
+export type LabelOutcome = "labelled" | "expired" | "interrupted";
 
 export interface LabelRecord {
   ts: string;
   sessionId: string;
   episodeId: string;
+  outcome: LabelOutcome;
   sourceTool: string;
-  targetTool: string;
-  planOrdinal: number;
+  /** Present only for a confirmed success. */
+  targetTool?: string;
+  planOrdinal?: number;
   /** `role<-from` pairs: keys/roles only, never values. */
   pairs: string[];
-  /** Tool calls that started after confirmation before the label. */
+  /** Closed judge-input snapshot so the future request can be replayed. */
+  request: unknown;
+  /** Tool calls that started after confirmation before the outcome. */
   interveningCalls: number;
   latencyMs: number;
 }
@@ -42,7 +52,7 @@ export interface LabelRecord {
 interface PendingEpisode {
   episodeId: string;
   sourceTool: string;
-  args: Record<string, unknown>;
+  request: unknown;
   plans: MappingPlan[];
   /**
    * Sequence number at confirmation time. Every call that started before the
@@ -59,13 +69,19 @@ export interface CollectorStats {
   episodesOpened: number;
   labelled: number;
   expired: number;
+  interrupted: number;
   ineligible: number;
+  evictedStarts: number;
+  oversizedStarts: number;
+  retainedRawBytes: number;
 }
 
 export interface ProspectiveLabelCollector {
   onToolStart(event: ToolStart): void;
-  onToolEnd(event: ToolEnd, now?: number): void;
-  onToolSuccess(toolName: string, args: unknown, now: number): LabelRecord | undefined;
+  /** Finalizes on the correlated end: success labels, failure consumes the window. */
+  onToolEnd(event: ToolEnd, now?: number): LabelRecord[];
+  /** Closes every unresolved episode as persisted evidence (turn end/interruption). */
+  closeUnresolved(reason: "expired" | "interrupted", now?: number): LabelRecord[];
   pendingCount(): number;
   stats(): CollectorStats;
   clear(): void;
@@ -79,9 +95,10 @@ export function createProspectiveLabelCollector(options: {
 }): ProspectiveLabelCollector {
   const maxPending = options.maxPending ?? MAX_PENDING_EPISODES;
   const pending = new Map<string, PendingEpisode>();
-  const starts = new Map<string, { toolName: string; args: unknown; sequence: number }>();
+  const starts = new Map<string, { toolName: string; args: unknown; sequence: number; bytes: number }>();
+  let retainedBytes = 0;
   const confirmedOrder: string[] = [];
-  const stats: CollectorStats = { observedCalls: 0, validationFailures: 0, episodesOpened: 0, labelled: 0, expired: 0, ineligible: 0 };
+  const stats: CollectorStats = { observedCalls: 0, validationFailures: 0, episodesOpened: 0, labelled: 0, expired: 0, interrupted: 0, ineligible: 0, evictedStarts: 0, oversizedStarts: 0, retainedRawBytes: 0 };
   let sequence = 0;
 
   const forget = (toolCallId: string): void => {
@@ -90,23 +107,48 @@ export function createProspectiveLabelCollector(options: {
     if (index >= 0) confirmedOrder.splice(index, 1);
   };
 
+  const dropStart = (toolCallId: string): void => {
+    const entry = starts.get(toolCallId);
+    if (entry === undefined) return;
+    retainedBytes -= entry.bytes;
+    starts.delete(toolCallId);
+  };
+
   return {
     onToolStart(event) {
       if (!options.isEnabled()) return;
       sequence++;
       stats.observedCalls++;
-      starts.set(event.toolCallId, { toolName: event.toolName, args: event.args, sequence });
-      // Bounded memory: oldest unlabelled episodes expire first.
+
+      // Per-entry cap: an oversized payload is never retained (fail closed).
+      const bytes = Buffer.byteLength(JSON.stringify(event.args ?? null), "utf8");
+      if (bytes > MAX_RAW_ARG_BYTES) {
+        stats.oversizedStarts++;
+        dropStart(event.toolCallId);
+        stats.retainedRawBytes = retainedBytes;
+        return;
+      }
+      dropStart(event.toolCallId);
+      starts.set(event.toolCallId, { toolName: event.toolName, args: event.args, sequence, bytes });
+      retainedBytes += bytes;
+
+      // Bounded count and aggregate bytes: evict oldest, always fail closed.
+      while (starts.size > MAX_OBSERVED_CALLS || retainedBytes > MAX_TOTAL_RAW_BYTES) {
+        const oldest = starts.keys().next();
+        if (oldest.done === true) break;
+        dropStart(oldest.value);
+        stats.evictedStarts++;
+      }
+      stats.retainedRawBytes = retainedBytes;
+
+      // Bound pending episodes and expire windows that closed before this call.
       while (pending.size > maxPending) {
         const oldest = pending.keys().next();
         if (oldest.done === true) break;
         forget(oldest.value);
         stats.expired++;
       }
-      // Expire episodes whose window closed before this call.
       for (const [id, episode] of [...pending]) {
-        const started = starts.get(id);
-        if (started === undefined) continue;
         if (sequence - episode.confirmedSequence > FOLLOWING_CALL_WINDOW) {
           forget(id);
           stats.expired++;
@@ -115,67 +157,106 @@ export function createProspectiveLabelCollector(options: {
     },
 
     onToolEnd(event, now = Date.now()) {
-      if (!options.isEnabled()) return;
+      if (!options.isEnabled()) return [];
       const started = starts.get(event.toolCallId);
-      // Confirmation: an anchored Pi validation failure for this exact tool call.
-      const headerTool = PI_VALIDATION_HEADER.exec(event.errorText ?? "")?.[1];
-      if (event.isError !== true || headerTool === undefined || headerTool !== event.toolName) return;
-      stats.validationFailures++;
-      if (started === undefined || started.args === null || typeof started.args !== "object" || Array.isArray(started.args)) {
-        stats.ineligible++;
-        return;
-      }
-      const enumeration = planMappings(event.toolName, started.args);
-      if (enumeration.status !== "plans") {
-        stats.ineligible++;
-        return;
-      }
-      pending.set(event.toolCallId, {
-        episodeId: `${options.sessionId()}#${event.toolCallId}`,
-        sourceTool: event.toolName,
-        args: started.args as Record<string, unknown>,
-        plans: enumeration.plans,
-        confirmedSequence: sequence,
-        openedAt: now,
-      });
-      confirmedOrder.push(event.toolCallId);
-      stats.episodesOpened++;
-    },
+      dropStart(event.toolCallId);
+      stats.retainedRawBytes = retainedBytes;
+      if (started === undefined) return [];
 
-    onToolSuccess(toolName, args, now) {
-      if (!options.isEnabled() || pending.size === 0) return undefined;
-      const current = sequence;
+      const headerTool = PI_VALIDATION_HEADER.exec(event.errorText ?? "")?.[1];
+      const isValidationFailure = event.isError === true && headerTool !== undefined && headerTool === event.toolName;
+
+      if (isValidationFailure) {
+        stats.validationFailures++;
+        if (started.args === null || typeof started.args !== "object" || Array.isArray(started.args)) {
+          stats.ineligible++;
+          return [];
+        }
+        const enumeration = planMappings(event.toolName, started.args);
+        if (enumeration.status !== "plans") {
+          stats.ineligible++;
+          return [];
+        }
+        pending.set(event.toolCallId, {
+          episodeId: `${options.sessionId()}#${event.toolCallId}`,
+          sourceTool: event.toolName,
+          request: buildToolMappingRequest(event.toolName, enumeration.plans, started.args as Record<string, unknown>).state,
+          plans: enumeration.plans,
+          confirmedSequence: sequence,
+          openedAt: now,
+        });
+        confirmedOrder.push(event.toolCallId);
+        stats.episodesOpened++;
+        return [];
+      }
+
+      // A failed, timed-out, aborted, or blocked call consumes the window but
+      // can never label an episode.
+      if (event.isError === true) return [];
+
+      // Confirmed success: this is the only place a label can be produced.
+      // The end event carries no arguments, so the start payload is the source.
+      const emitted: LabelRecord[] = [];
       for (const id of [...confirmedOrder]) {
         const episode = pending.get(id);
         if (episode === undefined) continue;
-        // Earlier parallel siblings are excluded: only calls that start after
-        // confirmation can label the episode.
-        const started = starts.get(id);
-        if (started !== undefined && current <= episode.confirmedSequence) continue;
+        const current = sequence;
+        if (current <= episode.confirmedSequence) continue; // parallel sibling started before confirmation
         if (current - episode.confirmedSequence > FOLLOWING_CALL_WINDOW) {
           forget(id);
           stats.expired++;
           continue;
         }
-        const matching = episode.plans.find((plan) => planMatchesCall(plan, { id, ts: "", kind: "toolCall", toolName, args: args as Record<string, unknown> }));
+        if (started.toolName !== event.toolName) continue;
+        if (started.args === null || typeof started.args !== "object" || Array.isArray(started.args)) continue;
+        const successArgs = started.args as Record<string, unknown>;
+        const matching = episode.plans.find((plan) => planMatchesCall(plan, { id, ts: "", kind: "toolCall", toolName: event.toolName, args: successArgs }));
         if (matching === undefined) continue;
         const record: LabelRecord = {
           ts: new Date(now).toISOString(),
           sessionId: options.sessionId(),
           episodeId: episode.episodeId,
+          outcome: "labelled",
           sourceTool: episode.sourceTool,
           targetTool: matching.targetTool,
           planOrdinal: matching.ordinal,
           pairs: matching.pairs.map((pair) => `${pair.to}<-${pair.from}`),
+          request: episode.request,
           interveningCalls: Math.max(0, current - episode.confirmedSequence - 1),
           latencyMs: Math.max(0, now - episode.openedAt),
         };
         forget(id);
         stats.labelled++;
         options.onLabel?.(record);
-        return record;
+        emitted.push(record);
       }
-      return undefined;
+      return emitted;
+    },
+
+    closeUnresolved(reason, now = Date.now()) {
+      if (!options.isEnabled()) return [];
+      const emitted: LabelRecord[] = [];
+      for (const id of [...confirmedOrder]) {
+        const episode = pending.get(id);
+        forget(id);
+        if (episode === undefined) continue;
+        if (reason === "expired") stats.expired++;
+        else stats.interrupted++;
+        const record: LabelRecord = {
+          ts: new Date(now).toISOString(),
+          sessionId: options.sessionId(),
+          episodeId: episode.episodeId,
+          outcome: reason,
+          sourceTool: episode.sourceTool,
+          pairs: [],
+          request: episode.request,
+          interveningCalls: Math.max(0, sequence - episode.confirmedSequence),
+          latencyMs: Math.max(0, now - episode.openedAt),
+        };
+        options.onLabel?.(record);
+        emitted.push(record);
+      }
+      return emitted;
     },
 
     pendingCount: () => pending.size,
@@ -184,6 +265,8 @@ export function createProspectiveLabelCollector(options: {
       pending.clear();
       confirmedOrder.length = 0;
       starts.clear();
+      retainedBytes = 0;
+      stats.retainedRawBytes = 0;
       sequence = 0;
     },
   };
@@ -196,10 +279,12 @@ export function renderLabelRecord(record: LabelRecord): string {
     eventType: "prospective-label",
     sessionId: record.sessionId,
     episodeId: record.episodeId,
+    outcome: record.outcome,
     sourceTool: record.sourceTool,
-    targetTool: record.targetTool,
-    planOrdinal: record.planOrdinal,
+    ...(record.targetTool === undefined ? {} : { targetTool: record.targetTool }),
+    ...(record.planOrdinal === undefined ? {} : { planOrdinal: record.planOrdinal }),
     pairs: record.pairs,
+    request: record.request,
     interveningCalls: record.interveningCalls,
     latencyMs: record.latencyMs,
   });
@@ -210,7 +295,9 @@ export function labelRecordIsPrivacySafe(record: LabelRecord): boolean {
   const serialized = renderLabelRecord(record);
   const identifier = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
   if (!identifier.test(record.sourceTool)) return false;
-  if (!identifier.test(record.targetTool)) return false;
+  if (record.targetTool !== undefined && !identifier.test(record.targetTool)) return false;
   if (record.pairs.some((pair) => !pair.split("<-").every((token) => identifier.test(token)))) return false;
-  return !serialized.includes("\n") && TOOL_CONTRACTS.has(record.targetTool);
+  if (serialized.includes("\n")) return false;
+  // Unresolved outcomes carry no target, so they are valid without one.
+  return record.targetTool === undefined || TOOL_CONTRACTS.has(record.targetTool);
 }
