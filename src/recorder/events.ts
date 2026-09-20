@@ -12,6 +12,8 @@ export interface WelderEvent {
   inputKeys: string[];
   /** Routing audit: the tool a blocked call was routed to. Never a payload. */
   targetTool?: string;
+  /** Routing audit: true when Jev classified the route. Never the content. */
+  classified?: boolean;
   wasError?: boolean;
   errorKind?: string;
   errorText?: string;
@@ -39,6 +41,7 @@ interface BuildEventInput {
   repairs: Repair[];
   inputKeys: string[];
   targetTool?: string;
+  classified?: boolean;
 }
 
 interface BuildToolResultEventInput {
@@ -61,6 +64,7 @@ export function buildEvent(input: BuildEventInput): WelderEvent {
     wasRepaired: input.repairs.length > 0,
     inputKeys: input.inputKeys,
     ...(input.targetTool === undefined ? {} : { targetTool: input.targetTool }),
+    ...(input.classified === undefined ? {} : { classified: input.classified }),
   };
 }
 

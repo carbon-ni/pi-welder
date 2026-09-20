@@ -19,6 +19,7 @@ import {
 
 import type { ExtensionHost, WelderContext } from "./infra/pi/contracts.ts";
 import { wrapToolForBashRouting, type BashDelegate, type RouteToolName, type ToolLike } from "./command-routing/wrapper.ts";
+import { createTypeSafeBashJudgeClient } from "./bash-judgment/client.ts";
 import { appendEvent, buildEvent, recordRepairs } from "./recorder/index.ts";
 import { logDir, modelMeta, sessionId } from "./infra/pi/context.ts";
 import { recordRepairWarnings } from "./repair-warnings.ts";
@@ -63,6 +64,8 @@ export default function (pi: ExtensionHost) {
   const config = loadWelderConfig();
   // Whitespace-only or absent keys mean no client exists at all.
   const apiKey = process.env.TYPESAFE_API_KEY?.trim() || undefined;
+  // Dedicated classifier capability; absent without a key, so it stays inert.
+  const bashJudge = apiKey ? createTypeSafeBashJudgeClient({ apiKey }) : undefined;
   const runtime = createRuntime({
     ...config,
     // Client exists whenever an API key is present, so the setting can be
@@ -82,11 +85,18 @@ export default function (pi: ExtensionHost) {
       state: runtime.bashRouteState,
       delegate: piBashDelegate,
       resolveBuiltin: resolveBuiltinFor(toolName),
+      // Dedicated classifier: a non-exact sentinel is only created when this
+      // capability exists, so no key means the feature stays fully inert.
+      ...(bashJudge === undefined ? {} : { judgeBash: bashJudge }),
       onRouted: (audit, ctx) => {
         // Audit carries the source and target tool names only: never the command.
         const context = ctx as WelderContext;
         const repairs: Repair[] = [{ field: "input", action: "route-to-bash" }];
         runtime.stats.totalToolCalls++;
+        if (audit.classified === true) {
+          repairs.push({ field: "input", action: "route-to-bash" });
+          if (context.hasUI) context.ui.setStatus("welder", `🔧 ${audit.sourceTool}: route-to-bash (jev-classified)`);
+        }
         recordRepairs(runtime.stats, repairs);
         recordRepairWarnings(runtime.repairWarnings, repairs, audit.sourceTool);
         void appendEvent(logDir(context), sessionId(context), buildEvent({
@@ -96,6 +106,7 @@ export default function (pi: ExtensionHost) {
           ...modelMeta(context),
           repairs,
           inputKeys: [],
+          ...(audit.classified === true ? { classified: true } : {}),
         })).catch(() => { /* logging never breaks tool flow */ });
       },
     }));

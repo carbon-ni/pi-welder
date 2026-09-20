@@ -133,6 +133,8 @@ export interface RoutedAudit {
   sourceTool: RouteToolName;
   targetTool: "bash";
   toolCallId: string;
+  /** True when the route came from a Jev classification (never the content). */
+  classified?: boolean;
 }
 
 /** Minimal structural contracts; the composition root passes real definitions. */
@@ -248,7 +250,7 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
           if (verdict !== "bash") throwRouteRefusal(toolName, "classified as not-bash");
         }
         if (ctx?.isProjectTrusted?.() !== true) throwRouteRefusal(toolName, "untrusted project");
-        onRouted?.({ sourceTool: toolName, targetTool: "bash", toolCallId }, ctx);
+        onRouted?.({ sourceTool: toolName, targetTool: "bash", toolCallId, ...(stored.judgment === undefined ? {} : { classified: true }) }, ctx);
         try {
           const result = await delegate({
             toolCallId,
