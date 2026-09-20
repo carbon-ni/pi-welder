@@ -75,7 +75,7 @@ test("metrics exclude deterministically covered cases from Jev precision", () =>
   assert.equal(metrics.latencyMs, 20);
 });
 
-test("wrong mutating-rule selections are hard failures that block routing", () => {
+test("wrong mutating-rule selections at/above the threshold are hard failures", () => {
   const cases: LabeledFailure[] = [
     { caseId: "c1", toolName: "edit", errorKind: "EDIT_NOT_FOUND", errorText: "Could not find edits[0] in src/a.ts.", label: "none" },
   ];
@@ -83,11 +83,29 @@ test("wrong mutating-rule selections are hard failures that block routing", () =
     { caseId: "c1", status: "answered", answer: "nest-edit-fields", confidence: 0.99, latencyMs: 5 },
   ]);
   assert.equal(metrics.jevWrong, 1);
-  assert.equal(metrics.jevUnsafeWrong, 1);
+  assert.equal(metrics.jevHighConfidenceWrong, 1);
+  assert.equal(metrics.jevHighConfidenceUnsafeWrong, 1);
   assert.equal(decideRouting(metrics).decision, "don't-route");
 });
 
-test("a wrong non-mutating (result-repair) choice is counted but not unsafe", () => {
+test("a wrong mutating-rule pick below the threshold is disclosed calibration evidence, not a hard failure", () => {
+  const cases: LabeledFailure[] = [
+    { caseId: "c1", toolName: "edit", errorKind: "EDIT_NOT_FOUND", errorText: "Could not find edits[0] in src/a.ts.", label: "none" },
+  ];
+  const metrics = evaluateRouting(cases, statesFor(cases), [
+    { caseId: "c1", status: "answered", answer: "nest-edit-fields", confidence: 0.65, latencyMs: 5 },
+  ]);
+  assert.equal(metrics.jevWrong, 1, "overall wrong is still reported");
+  assert.equal(metrics.jevUnsafeWrong, 1, "unsafe prediction is still disclosed");
+  assert.equal(metrics.jevHighConfidenceWrong, 0, "no wrong automatic action");
+  assert.equal(metrics.jevHighConfidenceUnsafeWrong, 0);
+  assert.equal(metrics.jevBelowThresholdWrong, 1);
+  const decision = decideRouting(metrics);
+  assert.equal(decision.decision, "needs-more-data", "below-threshold wrong does not reject; insufficient labels does");
+  assert.match(decision.reason, /high-confidence labels/);
+});
+
+test("a wrong non-mutating (result-repair) choice at threshold is counted as a precision failure", () => {
   const cases: LabeledFailure[] = [
     { caseId: "c1", toolName: "edit", errorKind: "EDIT_NOT_FOUND", errorText: "Could not find edits[0] in src/a.ts.", label: "none" },
   ];
@@ -95,18 +113,19 @@ test("a wrong non-mutating (result-repair) choice is counted but not unsafe", ()
     { caseId: "c1", status: "answered", answer: "edit-noop", confidence: 0.99, latencyMs: 5 },
   ]);
   assert.equal(metrics.jevWrong, 1);
-  assert.equal(metrics.jevUnsafeWrong, 0);
-  assert.notEqual(decideRouting(metrics).decision, "don't-route-unsafe" as never);
+  assert.equal(metrics.jevHighConfidenceUnsafeWrong, 0, "result repairs are visible, not mutating");
+  assert.equal(metrics.jevPrecisionAtThreshold, 0);
 });
 
-test("decision: needs-more-data below the case minimum, don't-route below precision", () => {
+test("decision: needs-more-data below the high-confidence minimum, don't-route below precision", () => {
   const base = {
     cases: 10, labeledUnresolved: 10, deterministicCovered: 0, deterministicCorrect: 0, deterministicCoverage: 0,
     deterministicPrecision: 0, jevEligible: 10, jevAttempted: 5, jevAbstained: 0, jevMalformed: 0, jevFailed: 0,
-    jevCorrect: 5, jevWrong: 0, jevUnsafeWrong: 0, jevPrecision: 1, jevHighConfidenceAttempted: 5,
+    jevCorrect: 5, jevWrong: 0, jevHighConfidenceWrong: 0, jevHighConfidenceUnsafeWrong: 0,
+    jevBelowThresholdWrong: 0, jevUnsafeWrong: 0, jevPrecision: 1, jevHighConfidenceAttempted: 5,
     jevPrecisionAtThreshold: 1, marginalCoverage: 5, latencyMs: 0,
   };
-  assert.equal(decideRouting({ ...base, labeledUnresolved: ROUTING_POLICY.minLabeledUnresolved - 1 }).decision, "needs-more-data");
-  assert.equal(decideRouting({ ...base, labeledUnresolved: 40, jevHighConfidenceAttempted: 40, jevPrecisionAtThreshold: 0.5 }).decision, "don't-route");
-  assert.equal(decideRouting({ ...base, labeledUnresolved: 40, jevHighConfidenceAttempted: 40, jevPrecisionAtThreshold: 1 }).decision, "route");
+  assert.equal(decideRouting({ ...base, jevHighConfidenceAttempted: ROUTING_POLICY.minLabeledUnresolved - 1 }).decision, "needs-more-data");
+  assert.equal(decideRouting({ ...base, jevHighConfidenceAttempted: 40, jevPrecisionAtThreshold: 0.5 }).decision, "don't-route");
+  assert.equal(decideRouting({ ...base, jevHighConfidenceAttempted: 40, jevPrecisionAtThreshold: 1 }).decision, "route");
 });

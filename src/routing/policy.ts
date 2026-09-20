@@ -74,6 +74,13 @@ export interface RoutingMetrics {
   jevFailed: number;
   jevCorrect: number;
   jevWrong: number;
+  /** Wrong picks at/above the confidence threshold: automatic-action failures. */
+  jevHighConfidenceWrong: number;
+  /** Wrong picks of a mutating rule at/above the threshold: hard safety failure. */
+  jevHighConfidenceUnsafeWrong: number;
+  /** Wrong picks below the threshold: disclosed calibration evidence, never actioned. */
+  jevBelowThresholdWrong: number;
+  /** Wrong picks of a mutating rule at any confidence (disclosure). */
   jevUnsafeWrong: number;
   jevPrecision: number;
   jevHighConfidenceAttempted: number;
@@ -98,6 +105,9 @@ export function evaluateRouting(
   let jevFailed = 0;
   let jevCorrect = 0;
   let jevWrong = 0;
+  let jevHighConfidenceWrong = 0;
+  let jevHighConfidenceUnsafeWrong = 0;
+  let jevBelowThresholdWrong = 0;
   let jevUnsafeWrong = 0;
   let jevHighConfidenceAttempted = 0;
   let jevHighConfidenceCorrect = 0;
@@ -124,13 +134,20 @@ export function evaluateRouting(
     if (answer === undefined) { jevAbstained++; continue; }
     jevAttempted++;
     const correct = answer === evaluationCase.label;
+    const highConfidence = (result.confidence ?? 0) >= ROUTING_POLICY.confidenceThreshold;
     if (correct) {
       jevCorrect++;
     } else {
       jevWrong++;
       if (UNSAFE_RULES.has(answer)) jevUnsafeWrong++;
+      if (highConfidence) {
+        jevHighConfidenceWrong++;
+        if (UNSAFE_RULES.has(answer)) jevHighConfidenceUnsafeWrong++;
+      } else {
+        jevBelowThresholdWrong++;
+      }
     }
-    if ((result.confidence ?? 0) >= ROUTING_POLICY.confidenceThreshold) {
+    if (highConfidence) {
       jevHighConfidenceAttempted++;
       if (correct) jevHighConfidenceCorrect++;
     }
@@ -150,6 +167,9 @@ export function evaluateRouting(
     jevFailed,
     jevCorrect,
     jevWrong,
+    jevHighConfidenceWrong,
+    jevHighConfidenceUnsafeWrong,
+    jevBelowThresholdWrong,
     jevUnsafeWrong,
     jevPrecision: jevAttempted === 0 ? 0 : jevCorrect / jevAttempted,
     jevHighConfidenceAttempted,
@@ -161,20 +181,23 @@ export function evaluateRouting(
 
 export type RoutingRecommendation = "route" | "don't-route" | "needs-more-data";
 
+/**
+ * Accepted policy: promotion requires >= 30 high-confidence labels, precision
+ * >= 0.99 at the threshold, and zero wrong automatic actions at the threshold.
+ * A wrong mutating choice rejects only at/above the threshold; below-threshold
+ * wrong picks are calibration evidence and operational abstentions.
+ */
 export function decideRouting(metrics: RoutingMetrics): { decision: RoutingRecommendation; reason: string } {
-  if (metrics.jevUnsafeWrong > ROUTING_POLICY.maxUnsafeWrong) {
-    return { decision: "don't-route", reason: `wrong mutating-rule selections: ${metrics.jevUnsafeWrong}` };
+  if (metrics.jevHighConfidenceUnsafeWrong > ROUTING_POLICY.maxUnsafeWrong) {
+    return { decision: "don't-route", reason: `wrong mutating-rule selections at >= ${ROUTING_POLICY.confidenceThreshold}: ${metrics.jevHighConfidenceUnsafeWrong}` };
   }
-  if (metrics.labeledUnresolved < ROUTING_POLICY.minLabeledUnresolved) {
-    return { decision: "needs-more-data", reason: `labeled unresolved cases: ${metrics.labeledUnresolved} < ${ROUTING_POLICY.minLabeledUnresolved}` };
+  if (metrics.jevHighConfidenceAttempted < ROUTING_POLICY.minLabeledUnresolved) {
+    return { decision: "needs-more-data", reason: `high-confidence labels: ${metrics.jevHighConfidenceAttempted} < ${ROUTING_POLICY.minLabeledUnresolved} (below-threshold wrong picks: ${metrics.jevBelowThresholdWrong}, disclosed calibration evidence)` };
   }
   if (metrics.jevPrecisionAtThreshold < ROUTING_POLICY.minPrecision) {
     return { decision: "don't-route", reason: `precision@${ROUTING_POLICY.confidenceThreshold}: ${metrics.jevPrecisionAtThreshold.toFixed(3)} < ${ROUTING_POLICY.minPrecision}` };
   }
-  if (metrics.jevHighConfidenceAttempted < ROUTING_POLICY.minLabeledUnresolved) {
-    return { decision: "needs-more-data", reason: `high-confidence attempts: ${metrics.jevHighConfidenceAttempted} < ${ROUTING_POLICY.minLabeledUnresolved}` };
-  }
-  return { decision: "route", reason: `precision@${ROUTING_POLICY.confidenceThreshold} ${metrics.jevPrecisionAtThreshold.toFixed(3)} over ${metrics.jevHighConfidenceAttempted} attempts` };
+  return { decision: "route", reason: `precision@${ROUTING_POLICY.confidenceThreshold} ${metrics.jevPrecisionAtThreshold.toFixed(3)} over ${metrics.jevHighConfidenceAttempted} high-confidence labels, zero wrong at threshold` };
 }
 
 export type { LabeledFailure, RoutingLabel };
