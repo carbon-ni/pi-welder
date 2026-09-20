@@ -60,16 +60,8 @@ export interface CommandRegistrar {
 export interface ToolExecutionStartEvent { toolCallId: string; toolName: string; args: unknown }
 export interface ToolExecutionEndEvent { toolCallId: string; toolName: string; isError: boolean; result?: unknown }
 
-export interface TurnEndEvent { turnIndex?: number }
-export interface InputEvent { text?: string }
-export interface AgentSettledEvent { reason?: string }
 
 interface ExtensionEvents {
-  input: InputEvent;
-  agent_settled: AgentSettledEvent;
-  turn_end: TurnEndEvent;
-  tool_execution_start: ToolExecutionStartEvent;
-  tool_execution_end: ToolExecutionEndEvent;
   tool_call: ToolCallEvent;
   tool_result: ToolResultEvent;
   context: ContextEvent;

@@ -5,12 +5,12 @@ import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { REPAIR_NAMES } from "./repair-names.ts";
 import type { WelderConfig } from "./config.ts";
 
-const off: WelderConfig = { modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false, prospectiveLabelsEnabled: false };
-const on: WelderConfig = { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false, prospectiveLabelsEnabled: false };
+const off: WelderConfig = { modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false };
+const on: WelderConfig = { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false };
 
 test("welderSettingItems reflects current config values as on/off", () => {
   const items = welderSettingItems(off);
-  assert.equal(items.length, 7 + REPAIR_NAMES.length);
+  assert.equal(items.length, 6 + REPAIR_NAMES.length);
   const reporting = items.find((it) => it.id === "modelRepairReportingEnabled")!;
   assert.equal(reporting.currentValue, "off");
   assert.deepEqual(reporting.values, ["on", "off"]);

@@ -7,7 +7,6 @@ import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { openWelderSettings } from "./infra/pi/settings-ui.ts";
 import type { WelderConfig } from "./config.ts";
 import { setCommandReroutingEnabled, setDisabledRepairs, setRepairsEnabled } from "./runtime.ts";
-import type { LabelRecord } from "./prospective-labels/collector.ts";
 import {
   clearRecovery,
   recoveryFailuresSummary,
@@ -111,39 +110,21 @@ export function mineSummary(result: MineResult): string {
   ].join("\n");
 }
 
-/** TASK-0037 collector counters, shown alongside repair stats. */
-export function prospectiveLabelSummary(runtime: WelderRuntime): string | undefined {
-  const stats = runtime.prospectiveLabels?.stats();
-  if (!stats || stats.observedCalls === 0) return undefined;
-  return [
-    `labels: observed=${stats.observedCalls} validationFailures=${stats.validationFailures}`,
-    `episodes=${stats.episodesOpened} labelled=${stats.labelled} expired=${stats.expired} interrupted=${stats.interrupted}`,
-    `ineligible=${stats.ineligible} evictedStarts=${stats.evictedStarts} oversizedStarts=${stats.oversizedStarts} retainedBytes=${stats.retainedRawBytes}`,
-  ].join("\n");
-}
-
 /**
  * Applies a loaded config to the live runtime. Every toggle takes effect without
  * a restart, and the bash-routing gate reads these fields live.
  */
-export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): LabelRecord[] {
+export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): void {
   runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
   setRepairsEnabled(runtime, current.repairsEnabled);
   setDisabledRepairs(runtime, current.disabledRepairs);
   setCommandReroutingEnabled(runtime, current.commandReroutingEnabled);
-  const closures: LabelRecord[] = [];
-  if (runtime.prospectiveLabelsEnabled !== current.prospectiveLabelsEnabled) {
-    // Disabling closes what is pending; the caller persists exactly once.
-    closures.push(...(runtime.prospectiveLabels?.closeUnresolved("expired") ?? []));
-    runtime.prospectiveLabelsEnabled = current.prospectiveLabelsEnabled;
-  }
   setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
   try {
     setRecoveryLimit(runtime.recovery, current.recoveryGuidanceLimit);
   } catch {
     /* config is parsed to a valid 1-10 integer */
   }
-  return closures;
 }
 
 export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] {
@@ -151,9 +132,7 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
     {
       name: "welder-stats",
       description: "Show pi-welder repair stats for this session",
-      handler: async (_args, ctx) => {
-        ctx.ui.notify([statsSummary(runtime.stats), prospectiveLabelSummary(runtime)].filter(Boolean).join("\n"), "info");
-      },
+      handler: async (_args, ctx) => { ctx.ui.notify(statsSummary(runtime.stats), "info"); },
     },
     {
       name: "welder-shadow-stats",
@@ -169,7 +148,6 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
       name: "welder-reset",
       description: "Reset pi-welder session stats and pending failures",
       handler: async (_args, ctx) => {
-        runtime.prospectiveLabels?.clear();
         resetSessionState(runtime);
         runtime.stats.sessionId = sessionId(ctx);
         ctx.ui.notify("pi-welder: reset session stats and failure state", "info");
@@ -209,9 +187,7 @@ export function welderCommandSpecs(runtime: WelderRuntime): WelderCommandSpec[] 
         const items = welderSettingItems(current);
         await openWelderSettings(ctx, items, (id, value) => {
           current = applyWelderSetting(current, id, value);
-          for (const record of syncRuntimeConfig(runtime, current)) {
-            void import("./handlers.ts").then(({ persistLabelRecord }) => persistLabelRecord(ctx, record)).catch(() => { /* logging never breaks settings */ });
-          }
+          syncRuntimeConfig(runtime, current);
           ctx.ui.setStatus("welder", welderStatusText(runtime));
           try {
             saveWelderConfig(current);

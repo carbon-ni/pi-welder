@@ -21,11 +21,6 @@ export interface WelderConfig {
    * injected bash capability; every other condition fails closed.
    */
   commandReroutingEnabled: boolean;
-  /**
-   * TASK-0037 opt-in: collect prospective routing labels locally by observing
-   * the tool lifecycle. Default OFF. Never calls a model or executes anything.
-   */
-  prospectiveLabelsEnabled: boolean;
 }
 
 export const WELDER_CONFIG_PATH = join(homedir(), ".pi", "agent", "welder.json");
@@ -54,7 +49,6 @@ export function parseWelderConfig(value: unknown): WelderConfig {
     sourceShadowingEnabled: input.sourceShadowingEnabled === true,
     readPathRepairEnabled: input.readPathRepairEnabled === true,
     commandReroutingEnabled: input.commandReroutingEnabled === true,
-    prospectiveLabelsEnabled: input.prospectiveLabelsEnabled === true,
   };
 }
 

@@ -62,13 +62,6 @@ export function welderSettingItems(config: WelderConfig): WelderSettingItem[] {
       values: [...ON_OFF],
     },
     {
-      id: "prospectiveLabelsEnabled",
-      label: "Prospective routing labels",
-      description: "Collect local-only tool-routing labels from the tool lifecycle (no model calls, nothing executes)",
-      currentValue: config.prospectiveLabelsEnabled ? "on" : "off",
-      values: [...ON_OFF],
-    },
-    {
       id: "recoveryGuidanceLimit",
       label: "Failure history limit",
       description: "Max recent tool failures retained for explicit diagnostics",
@@ -103,9 +96,6 @@ export function applyWelderSetting(config: WelderConfig, id: string, value: stri
   }
   if (id === "commandReroutingEnabled") {
     return { ...config, commandReroutingEnabled: value === "on" };
-  }
-  if (id === "prospectiveLabelsEnabled") {
-    return { ...config, prospectiveLabelsEnabled: value === "on" };
   }
   if (id === "recoveryGuidanceLimit") {
     const limit = Number(value);

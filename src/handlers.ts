@@ -29,8 +29,6 @@ import { buildRestoreReadReason, recognizeReadShapedEdit } from "./read-shape.ts
 import { planReadPathRepair, runReadPathSelection, validateReadPathSelection } from "./read-recovery/path-repair.ts";
 import { recordReadPathSelection } from "./read-recovery/state.ts";
 import { sentinelTokenOf } from "./command-routing/wrapper.ts";
-import { labelLineIsPrivacySafe, labelRecordIsPrivacySafe, renderLabelRecord, type LabelRecord } from "./prospective-labels/collector.ts";
-import { appendLine } from "./prospective-labels/writer.ts";
 import { clearBashRouteTokens } from "./command-routing/wrapper.ts";
 
 export const DEFAULT_SESSION_RETENTION = 50;
@@ -61,9 +59,6 @@ export async function handleSessionStart(
 }
 
 export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
-  // Pending windows are persisted as interrupted before any state is cleared.
-  await handleProspectiveLabelClosure(runtime, "interrupted", ctx);
-  runtime.prospectiveLabels?.clear();
   clearBashRouteTokens(runtime.bashRouteState);
   await runtime.jevShadow?.shutdown().catch(() => { /* never block shutdown */ });
   await appendEpisodeRecords(runtime.episodes.closeAll(), ctx).catch(() => { /* never block shutdown */ });
@@ -341,62 +336,3 @@ export async function handleContext(runtime: WelderRuntime, event: ContextEvent,
 }
 
 
-// --- TASK-0037: prospective label lifecycle (local only) --------------------
-
-/** Verified public lifecycle: start fires before validation, end fires after. */
-export async function handleToolExecutionStart(
-  runtime: WelderRuntime,
-  event: { toolCallId: string; toolName: string; args: unknown },
-  ctx: WelderContext,
-): Promise<void> {
-  const expired = runtime.prospectiveLabels?.onToolStart({ toolCallId: event.toolCallId, toolName: event.toolName, args: event.args }) ?? [];
-  for (const record of expired) await persistLabelRecord(ctx, record);
-}
-
-export async function handleToolExecutionEnd(
-  runtime: WelderRuntime,
-  event: { toolCallId: string; toolName: string; isError: boolean; result?: unknown; args?: unknown },
-  ctx: WelderContext,
-): Promise<void> {
-  const failureText = errorTextOf(event.result);
-  const records = runtime.prospectiveLabels?.onToolEnd({
-    toolCallId: event.toolCallId,
-    toolName: event.toolName,
-    isError: event.isError,
-    args: event.args,
-    ...(failureText === undefined ? {} : { errorText: failureText }),
-  }) ?? [];
-  for (const record of records) await persistLabelRecord(ctx, record);
-}
-
-/**
- * TASK-0037: unresolved episodes are closed and persisted on turn end or user
- * interruption, so an interrupted window leaves evidence instead of vanishing.
- */
-export async function handleProspectiveLabelClosure(
-  runtime: WelderRuntime,
-  reason: "expired" | "interrupted",
-  ctx: WelderContext,
-): Promise<void> {
-  const records = runtime.prospectiveLabels?.closeUnresolved(reason) ?? [];
-  for (const record of records) await persistLabelRecord(ctx, record);
-}
-
-function errorTextOf(result: unknown): string | undefined {
-  const content = (result as { content?: unknown } | undefined)?.content;
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .map((block) => (block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : ""))
-    .filter(Boolean)
-    .join("\n");
-  return text.length === 0 ? undefined : text;
-}
-
-/** Persist a privacy-safe record; never fails the tool flow. */
-export async function persistLabelRecord(ctx: WelderContext, record: LabelRecord): Promise<void> {
-  // Privacy is enforced at the write boundary, not by the caller.
-  if (!labelRecordIsPrivacySafe(record)) return;
-  const line = renderLabelRecord(record);
-  if (!labelLineIsPrivacySafe(line)) return;
-  await appendLine(logDir(ctx), `${sessionId(ctx)}.labels.jsonl`, line).catch(() => { /* logging never breaks tool flow */ });
-}
