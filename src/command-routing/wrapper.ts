@@ -157,6 +157,12 @@ interface WrapOptions {
   /** Injected for deterministic tests. */
   nextToken?: () => string;
   onRouted?: (audit: RoutedAudit, ctx: unknown) => void;
+  /**
+   * TASK-0035 shadow hook. Fires when the exact router abstained and the
+   * arguments still carry string fields. Measurement only: the hook must never
+   * mutate the arguments or execute anything, and its result is ignored.
+   */
+  onNonExactShape?: (info: { toolName: RouteToolName; args: unknown }) => void;
   onDelegateError?: (error: unknown) => void;
 }
 
@@ -184,6 +190,9 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
   const { builtin, toolName, state, delegate, resolveBuiltin, onRouted } = options;
   const nextToken = options.nextToken ?? (() => globalThis.crypto.randomUUID().replaceAll("-", ""));
   const builtinPrepare = builtin.prepareArguments;
+  const isPlainObjectWithStrings = (value: unknown): boolean =>
+    Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value as Record<string, unknown>).some((entry) => typeof entry === "string" && entry.trim().length > 0);
 
   return {
     ...builtin,
@@ -194,9 +203,15 @@ export function wrapToolForBashRouting(options: WrapOptions): ToolLike {
 
     prepareArguments: (args: unknown): unknown => {
       const prepared = builtinPrepare ? builtinPrepare(args) : args;
-      if (!state.isEnabled() || !state.isTrusted()) return prepared;
+      if (!state.isEnabled() || !state.isTrusted()) {
+        if (isPlainObjectWithStrings(args)) options.onNonExactShape?.({ toolName, args });
+        return prepared;
+      }
       const call = recognizeBashShapedCall(toolName, args);
-      if (!call) return prepared;
+      if (!call) {
+        options.onNonExactShape?.({ toolName, args });
+        return prepared;
+      }
       // Oversized commands stay native: no token, no routing.
       if (commandBytes(call.command) > MAX_COMMAND_BYTES) return prepared;
       const token = nextToken();

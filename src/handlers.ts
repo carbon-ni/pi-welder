@@ -60,6 +60,7 @@ export async function handleSessionStart(
 
 export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
   clearBashRouteTokens(runtime.bashRouteState);
+  await runtime.mappingShadow?.drain().catch(() => { /* never block shutdown */ });
   await runtime.jevShadow?.shutdown().catch(() => { /* never block shutdown */ });
   await appendEpisodeRecords(runtime.episodes.closeAll(), ctx).catch(() => { /* never block shutdown */ });
   if (ctx.hasUI) ctx.ui.setStatus("welder", undefined);

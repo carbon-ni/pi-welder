@@ -3,6 +3,7 @@ import { createRecoveryState, type RecoveryState } from "./recovery.ts";
 import { createRepairWarningState, type RepairWarningState } from "./repair-warnings.ts";
 import { createEpisodeTracker, type EpisodeTracker } from "./episodes.ts";
 import { createJevShadow, type JevShadow, type ShadowEvidence } from "./model-recovery/jev-shadow.ts";
+import { createMappingShadow, type MappingShadow } from "./command-mapping/shadow.ts";
 import { createReadPathState, type ReadPathState } from "./read-recovery/state.ts";
 import { READ_PATH_EVIDENCE } from "./read-recovery/evidence-gate.ts";
 import type { JevClient } from "./infra/typesafe.ts";
@@ -33,6 +34,8 @@ export interface WelderRuntime {
   /** Separate client: read-path repair uses its own question/instructions. */
   readPathClient?: JevClient;
   jevShadow?: JevShadow;
+  /** TASK-0035 shadow-only command-mapping judge. Never executes or mutates. */
+  mappingShadow?: MappingShadow;
   shadowEvidence: ShadowEvidence[];
   /** Set by handlers to persist safe shadow metadata; never receives payloads. */
   onShadowEvidence?: (evidence: ShadowEvidence) => void;
@@ -129,6 +132,9 @@ export function setSourceShadowingEnabled(runtime: WelderRuntime, enabled: boole
 }
 
 function resetJevShadow(runtime: WelderRuntime): void {
+  runtime.mappingShadow = runtime.sourceShadowingEnabled && runtime.jevClient
+    ? createMappingShadow({ client: runtime.jevClient, isEnabled: () => runtime.sourceShadowingEnabled })
+    : undefined;
   runtime.jevShadow = runtime.sourceShadowingEnabled && runtime.jevClient
     ? createJevShadow({
         client: runtime.jevClient,

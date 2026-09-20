@@ -56,6 +56,8 @@ const resolveBuiltinFor = (toolName: RouteToolName) => (cwd: string): ToolLike =
   return createEditToolDefinition(cwd) as unknown as ToolLike;
 };
 
+let mappingShadowCounter = 0;
+
 export default function (pi: ExtensionHost) {
   const config = loadWelderConfig();
   // Whitespace-only or absent keys mean no client exists at all.
@@ -79,6 +81,10 @@ export default function (pi: ExtensionHost) {
       state: runtime.bashRouteState,
       delegate: piBashDelegate,
       resolveBuiltin: resolveBuiltinFor(toolName),
+      // TASK-0035: shadow-only measurement when the exact router abstained.
+      onNonExactShape: ({ toolName: sourceTool, args }) => {
+        runtime.mappingShadow?.observe({ toolCallId: `mapping-${++mappingShadowCounter}`, toolName: sourceTool, args });
+      },
       onRouted: (audit, ctx) => {
         // Audit carries the source and target tool names only: never the command.
         const context = ctx as WelderContext;
