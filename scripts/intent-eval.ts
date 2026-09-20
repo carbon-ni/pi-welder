@@ -5,6 +5,10 @@
  * Extract real failed calls with a later successful recovery from the session
  * corpus. Requests carry ONLY pre-failure structural context. Hypotheses are
  * deterministic causal intent claims. Ground truth (later success) is hidden.
+ *
+ * Validity limit: the later success is a FUTURE-BEHAVIOR PROXY for intent — the
+ * first later successful call may be unrelated work. Results measure agreement
+ * with that proxy, not verified causal intent.
  * Offline only; zero retries; no runtime integration.
  *
  * Usage:

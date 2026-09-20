@@ -3,8 +3,13 @@
  *
  * Hypotheses are mutually exclusive causal claims about what the agent was
  * trying to do — never repair-rule names or policy decisions. Code generates
- * 2–4 claims per failure family plus "uncertain". Ground truth is derived only
- * from the later successful call and is never sent to the model.
+ * 2–4 claims per failure family plus "uncertain".
+ *
+ * Validity limit: ground truth is a FUTURE-BEHAVIOR PROXY taken from the first
+ * later successful call; it is not verified causal intent. Claims in a family
+ * are intended to be mutually exclusive, but real failures can plausibly
+ * support more than one, so proxy agreement must not be read as intent
+ * identification.
  */
 
 import type { FailureFamily } from "./context.ts";

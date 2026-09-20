@@ -95,20 +95,76 @@ test("prior-tool history is bounded to the most recent observations", () => {
 
 test("jeq parsing preserves probabilities, validates options, and fails closed", () => {
   const valid = validIntentIds("missing-read");
+  const validProbabilityKeys = [...valid];
+  const probabilities = Object.fromEntries(validProbabilityKeys.map((key) => [key, key === "intent.create-then-read" ? 0.9 : 0.1 / (validProbabilityKeys.length - 1)]));
   const raw = JSON.stringify({
     model: "jev-1.13.0",
-    answers: { hypothesis: { type: "choice", choice: "intent.create-then-read", confidence: 0.82, probabilities: { "intent.create-then-read": 0.82, "intent.read-existing-file": 0.1, uncertain: 0.08 } } },
+    answers: { hypothesis: { type: "choice", choice: "intent.create-then-read", confidence: 0.82, probabilities } },
   });
   const parsed = parseIntentResponse(raw, valid)!;
   assert.equal(parsed.choice, "intent.create-then-read");
   assert.equal(parsed.confidence, 0.82);
-  assert.deepEqual(parsed.probabilities, { "intent.create-then-read": 0.82, "intent.read-existing-file": 0.1, uncertain: 0.08 });
+  assert.deepEqual(parsed.probabilities, probabilities);
   assert.equal(parsed.model, "jev-1.13.0");
 
   assert.equal(parseIntentResponse(raw, validIntentIds("ambiguous-edit")), undefined, "choice invalid for family fails closed");
   assert.equal(parseIntentResponse("not json", valid), undefined);
   assert.equal(parseIntentResponse(JSON.stringify({ answers: {} }), valid), undefined);
   assert.equal(parseIntentResponse(JSON.stringify({ answers: { hypothesis: { type: "choice", choice: "invented" } } }), valid), undefined);
+});
+
+function responseWith(overrides: { choice?: string; confidence?: unknown; probabilities?: unknown }, valid: ReadonlySet<string>): string {
+  const probabilities = Object.fromEntries([...valid].map((key) => [key, 1 / valid.size]));
+  return JSON.stringify({
+    answers: {
+      hypothesis: {
+        type: "choice",
+        choice: overrides.choice ?? "intent.read-existing-file",
+        ...(overrides.confidence === undefined ? {} : { confidence: overrides.confidence }),
+        probabilities: overrides.probabilities === undefined ? probabilities : overrides.probabilities,
+      },
+    },
+  });
+}
+
+test("parser hardening: confidence and probabilities must be finite [0,1]", () => {
+  const valid = validIntentIds("missing-read");
+  assert.equal(parseIntentResponse(responseWith({}, valid), valid)?.choice, "intent.read-existing-file");
+  assert.equal(parseIntentResponse(responseWith({ confidence: 1.2 }, valid), valid), undefined, "confidence > 1 fails closed");
+  assert.equal(parseIntentResponse(responseWith({ confidence: -0.1 }, valid), valid), undefined, "confidence < 0 fails closed");
+  assert.equal(parseIntentResponse(responseWith({ confidence: "high" }, valid), valid), undefined, "non-number confidence fails closed");
+  assert.equal(parseIntentResponse(responseWith({ confidence: Number.NaN }, valid), valid), undefined, "NaN confidence fails closed");
+
+  const withBadProbability = Object.fromEntries([...valid].map((key) => [key, key === "uncertain" ? 1.5 : 0]));
+  assert.equal(parseIntentResponse(responseWith({ probabilities: withBadProbability }, valid), valid), undefined, "probability > 1 fails closed");
+
+  const withNegative = Object.fromEntries([...valid].map((key) => [key, key === "uncertain" ? -0.5 : 0.5]));
+  assert.equal(parseIntentResponse(responseWith({ probabilities: withNegative }, valid), valid), undefined, "negative probability fails closed");
+
+  const withNonFinite = Object.fromEntries([...valid].map((key) => [key, key === "uncertain" ? Number.POSITIVE_INFINITY : 0]));
+  assert.equal(parseIntentResponse(responseWith({ probabilities: withNonFinite }, valid), valid), undefined, "non-finite probability fails closed");
+});
+
+test("parser hardening: probability keys must equal the criteria choices exactly", () => {
+  const valid = validIntentIds("missing-read");
+  const withExtra = { ...Object.fromEntries([...valid].map((key) => [key, 0.25])), invented: 0 };
+  assert.equal(parseIntentResponse(responseWith({ probabilities: withExtra }, valid), valid), undefined, "extra key fails closed");
+
+  const withMissing = Object.fromEntries([...valid].slice(1).map((key) => [key, 1 / (valid.size - 1)]));
+  assert.equal(parseIntentResponse(responseWith({ probabilities: withMissing }, valid), valid), undefined, "missing key fails closed");
+
+  assert.equal(parseIntentResponse(responseWith({ probabilities: {} }, valid), valid), undefined, "empty probabilities fail closed");
+  assert.equal(parseIntentResponse(responseWith({ probabilities: [0.5, 0.5] }, valid), valid), undefined, "array probabilities fail closed");
+});
+
+test("parser hardening: probabilities must sum to one within tolerance", () => {
+  const valid = validIntentIds("missing-read");
+  const short = Object.fromEntries([...valid].map((key) => [key, 0.1])); // sums to 0.4
+  assert.equal(parseIntentResponse(responseWith({ probabilities: short }, valid), valid), undefined, "sum far from 1 fails closed");
+
+  // Rounding-scale drift is tolerated.
+  const near = Object.fromEntries([...valid].map((key, index) => [key, index === 0 ? 0.71 : 0.1]));
+  assert.ok(parseIntentResponse(responseWith({ probabilities: near, confidence: 0.71 }, valid), valid), "small rounding drift is accepted");
 });
 
 test("metrics: accuracy, calibration, uncertain rate, precision@threshold, per family", () => {

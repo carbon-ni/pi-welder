@@ -2,6 +2,9 @@
  * TASK-0029 — jeq response parsing (probabilities preserved, fail closed) and
  * evaluation metrics (top-1 accuracy, calibration, uncertain behavior,
  * precision at >= 0.99, per-family breakdown).
+ *
+ * Scope: labels are a FUTURE-BEHAVIOR PROXY (the next successful call), not
+ * verified causal intent. Metrics measure agreement with that proxy.
  */
 
 import type { FailureFamily } from "./context.ts";
@@ -17,9 +20,21 @@ export interface IntentResponse {
 
 /**
  * Parses a jeq Choice response, preserving the probability distribution.
- * Unknown options, missing choice, or non-object payloads fail closed.
+ *
+ * Hardened fail-closed rules: the choice must be one of the family's criteria;
+ * `confidence`, when present, must be a finite number in [0,1]; `probabilities`
+ * must be present with keys EXACTLY equal to the criteria set, every value a
+ * finite number in [0,1], and the values must sum to 1 within tolerance.
+ * Anything else returns undefined (malformed).
  */
-export function parseIntentResponse(raw: string, validIds: ReadonlySet<string>): IntentResponse | undefined {
+export const PROBABILITY_SUM_TOLERANCE = 0.02;
+
+export function parseIntentResponse(
+  raw: string,
+  validIds: ReadonlySet<string>,
+  options: { sumTolerance?: number } = {},
+): IntentResponse | undefined {
+  const sumTolerance = options.sumTolerance ?? PROBABILITY_SUM_TOLERANCE;
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { return undefined; }
   if (!parsed || typeof parsed !== "object") return undefined;
@@ -27,13 +42,29 @@ export function parseIntentResponse(raw: string, validIds: ReadonlySet<string>):
   if (!answer || typeof answer !== "object" || typeof answer.choice !== "string") return undefined;
   if (!validIds.has(answer.choice)) return undefined;
 
-  const probabilities: Record<string, number> = {};
-  if (answer.probabilities && typeof answer.probabilities === "object") {
-    for (const [key, value] of Object.entries(answer.probabilities as Record<string, unknown>)) {
-      if (typeof value === "number" && Number.isFinite(value)) probabilities[key] = value;
-    }
+  const confidence = answer.confidence;
+  if (confidence !== undefined && (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1)) {
+    return undefined;
   }
-  const confidence = typeof answer.confidence === "number" && Number.isFinite(answer.confidence) ? answer.confidence : undefined;
+
+  const rawProbabilities = answer.probabilities;
+  if (!rawProbabilities || typeof rawProbabilities !== "object" || Array.isArray(rawProbabilities)) return undefined;
+  const probabilityKeys = Object.keys(rawProbabilities as Record<string, unknown>).sort();
+  const expectedKeys = [...validIds].sort();
+  if (probabilityKeys.length !== expectedKeys.length || probabilityKeys.some((key, index) => key !== expectedKeys[index])) {
+    return undefined; // keys must be exactly the criteria choices
+  }
+
+  const probabilities: Record<string, number> = {};
+  let sum = 0;
+  for (const key of expectedKeys) {
+    const value = (rawProbabilities as Record<string, unknown>)[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) return undefined;
+    probabilities[key] = value;
+    sum += value;
+  }
+  if (Math.abs(sum - 1) > sumTolerance) return undefined;
+
   const model = typeof (parsed as any).model === "string" ? (parsed as any).model : undefined;
   return { choice: answer.choice, ...(confidence === undefined ? {} : { confidence }), probabilities, ...(model === undefined ? {} : { model }) };
 }
