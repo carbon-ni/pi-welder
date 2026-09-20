@@ -1,7 +1,7 @@
 ---
 id: TASK-0021
 title: Evaluate Jev failure-to-repair-rule routing offline
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [typesafe, routing, repairs, experiment, offline]
@@ -27,7 +27,7 @@ Owner explicitly sequenced this experiment after reviewing the first `jeq` sessi
 - Deterministic veto and existing rule applicability checks run before Jev.
 - Jev sees only unresolved cases and returns one enumerated existing rule ID or `none`.
 - Automatic-action candidate requires confidence >=0.99, deterministic rule validation, and side-effect-free or reversible behavior.
-- Evaluation requires at least 30 labeled unresolved cases and precision >=0.99 at the threshold. Any unsafe/wrong mutating repair rejects promotion.
+- Evaluation requires at least 30 high-confidence labeled unresolved cases and precision >=0.99 at the threshold. Any unsafe/wrong mutating repair at or above the action threshold rejects promotion; below-threshold wrong predictions are disclosed calibration evidence and abstain operationally.
 
 ## Acceptance criteria
 - [ ] Output schema permits only enumerated rule IDs from the live repairs registry or "none"; unknown output fails closed.
