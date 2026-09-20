@@ -137,7 +137,7 @@ export function extractRoutingEpisodes(sessionId: string, events: readonly Routi
     const call = events[index]!;
     if (call.kind !== "toolCall" || typeof call.toolName !== "string") continue;
     const result = typeof call.toolCallId === "string" ? results.get(call.toolCallId) : undefined;
-    if (result?.isError !== true || !isValidationFailure(result.errorText)) continue;
+    if (result?.isError !== true || !isValidationFailure(result.errorText, call.toolName)) continue;
     attrition.mined++;
     if (call.args === undefined || Object.keys(call.args).length === 0) continue;
     attrition.shapeKnown++;

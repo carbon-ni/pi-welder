@@ -58,7 +58,7 @@ interface CorpusSnapshot { root: string; algorithm: string; files: number; bytes
 
 async function collect(sessionsDir: string): Promise<{ sessions: number; attrition: Record<string, number>; episodes: RoutingEpisode[]; corpus: CorpusSnapshot }> {
   const entries = await fs.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
-  const total: Record<string, number> = { mined: 0, shapeKnown: 0, equivalentSuccess: 0, reroute: 0, retry: 0, noSuccess: 0, wrongToolCommandShape: 0, wrongToolCommandShapeCorrect: 0 };
+  const total: Record<string, unknown> = { mined: 0, shapeKnown: 0, equivalentSuccess: 0, valueEquivalentSuccess: 0, reroute: 0, retry: 0, strictReroute: 0, strictRetry: 0, noSuccess: 0, wrongToolCommandShape: 0, wrongToolCommandShapeCorrect: 0, commandShapeAnySource: 0, reroutePairs: {} as Record<string, number> };
   const episodes: RoutingEpisode[] = [];
   const fingerprint: CorpusSnapshot["fingerprint"] = [];
   let sessions = 0;
@@ -76,7 +76,14 @@ async function collect(sessionsDir: string): Promise<{ sessions: number; attriti
       if (!session.sessionId) continue;
       sessions++;
       const { episodes: mined, attrition } = extractRoutingEpisodes(session.sessionId, session.events);
-      for (const key of Object.keys(total)) total[key] += (attrition as unknown as Record<string, number>)[key] ?? 0;
+      for (const key of Object.keys(total)) {
+        if (key === "reroutePairs") {
+          const pairs = total.reroutePairs as Record<string, number>;
+          for (const [pair, count] of Object.entries(attrition.reroutePairs)) pairs[pair] = (pairs[pair] ?? 0) + count;
+          continue;
+        }
+        total[key] = (total[key] as number) + ((attrition as unknown as Record<string, number>)[key] ?? 0);
+      }
       episodes.push(...mined);
     }
   }
@@ -92,7 +99,7 @@ async function collect(sessionsDir: string): Promise<{ sessions: number; attriti
     hash: digest.digest("hex"),
     fingerprint,
   };
-  return { sessions, attrition: total, episodes, corpus };
+  return { sessions, attrition: total as unknown as Record<string, number>, episodes, corpus };
 }
 
 interface AuditRecord {
@@ -193,9 +200,21 @@ async function commandRun(args: Args): Promise<void> {
     attrition,
     episodes: episodes.length,
     labelable: labelable.length,
-    labelableByKind: { "unique-exact": uniqueExact.length, "unique-incomplete": labelable.filter((e) => e.kind === "unique-incomplete").length, ambiguous: ambiguous.length },
+    labelableByKind: {
+      "unique-exact": uniqueExact.length,
+      "unique-incomplete": labelable.filter((e) => e.kind === "unique-incomplete").length,
+      ambiguous: ambiguous.length,
+      none: labelable.filter((e) => e.kind === "none").length,
+    },
+    reroutePairs: attrition.reroutePairs,
+    capabilityPolicy: {
+      allowed: labelable.filter((episode) => primaryCandidates(episode.matches)[0]?.routingAllowed === true).length,
+      blockedEscalation: labelable.filter((episode) => primaryCandidates(episode.matches)[0]?.routingAllowed === false).length,
+      blockedByLabel: labelable.filter((episode) => primaryCandidates(episode.matches).some((match) => match.tool === episode.labelTool && match.routingAllowed === false)).length,
+    },
     allEpisodesByKind: kindCounts,
     candidateSetCoverage,
+    reroutePairs: attrition.reroutePairs,
     topSourceTools: tally(episodes.map((episode) => episode.sourceTool)),
     topShapes: tally(episodes.map(shapeSignature)),
     requestPrivacyPass: privacyPass,

@@ -18,6 +18,7 @@ import {
   deterministicChoice,
   isValidationFailure,
   narrowByDeclaredKeys,
+  piValidationTool,
   primaryCandidates,
   rankCandidates,
   schemaMatch,
@@ -138,6 +139,15 @@ test("validation failure class and declared-key extraction are closed", () => {
   assert.equal(isValidationFailure("error: unexpected argument '--flag' found\n\nUsage: cargo test [OPTIONS]"), false);
   assert.equal(isValidationFailure("invalid parameter\nsecond line"), false);
   assert.equal(isValidationFailure(`invalid parameter ${"x".repeat(400)}`), false, "over-long text is not a tool-arg error");
+
+  // The real Pi header is multiline and names its tool.
+  assert.equal(isValidationFailure(PI_MULTILINE_EDIT_FAILURE), true);
+  assert.equal(isValidationFailure(PI_MULTILINE_EDIT_FAILURE, "edit"), true);
+  assert.equal(isValidationFailure(PI_MULTILINE_EDIT_FAILURE, "write"), false, "header tool must equal the attempted tool");
+  assert.equal(piValidationTool(PI_MULTILINE_EDIT_FAILURE), "edit");
+  assert.equal(piValidationTool("Validation failed for tool \"write\":\n  - content: Required"), "write");
+  assert.equal(piValidationTool("cargo: unexpected argument\nValidation failed for tool"), undefined, "header must be anchored");
+  assert.equal(isValidationFailure("Validation failed for tool", "write"), false, "bare words are not the header");
   assert.equal(isValidationFailure("ENOENT: no such file or directory"), false);
   assert.equal(isValidationFailure("Command timed out after 120 seconds"), false);
   assert.equal(isValidationFailure(undefined), false);
@@ -147,6 +157,18 @@ test("validation failure class and declared-key extraction are closed", () => {
   assert.deepEqual(declaredKeysOf("Unknown field: command"), ["command"]);
   assert.deepEqual(declaredKeysOf("no keys here"), []);
 });
+
+/** Real-shaped Pi validation failure captured from a work-wire-webapp session. */
+const PI_MULTILINE_EDIT_FAILURE = [
+  'Validation failed for tool "edit":',
+  "  - edits: must have required properties edits",
+  "",
+  "Received arguments:",
+  "{",
+  '  "path": ".tmp/reports/07-09-26/sales-drive-upload-timeout.md",',
+  '  "content": "# report body with SECRET_PATH text"',
+  "}",
+].join("\n");
 
 function call(id: string, toolName: string, args: Record<string, unknown>, index = 0): RoutingEvent[] {
   return [{ id: `c${index}`, ts: "t", kind: "toolCall", toolName, toolCallId: id, args }];
@@ -220,6 +242,54 @@ test("mining ignores non-validation failures and empty argument shapes", () => {
   assert.equal(attrition.mined, 0);
   const emptyArgs: RoutingEvent[] = [ ...call("f1", "write", {}, 0), ...result("f1", true, "Missing required field: path.", 0, "write") ];
   assert.equal(extractRoutingEpisodes("s", emptyArgs).attrition.shapeKnown, 0);
+});
+
+test("mining accepts the real multiline Pi header and labels the capability-equal reroute", () => {
+  // edit received write's shape, then write succeeded with the same arguments.
+  const events: RoutingEvent[] = [
+    ...call("f1", "edit", { path: "docs/notes.md", content: "body" }, 0),
+    ...result("f1", true, PI_MULTILINE_EDIT_FAILURE, 0, "edit"),
+    ...call("s1", "write", { path: "docs/notes.md", content: "body" }, 1),
+    ...result("s1", false, "", 1, "write"),
+  ];
+  const { episodes, attrition } = extractRoutingEpisodes("session-1", events);
+  assert.equal(attrition.mined, 1);
+  assert.equal(attrition.reroute, 1);
+  assert.equal(attrition.strictReroute, 1);
+  assert.equal(episodes[0]!.kind, "unique-exact");
+  assert.equal(episodes[0]!.labelTool, "write");
+  assert.equal(episodes[0]!.sourceTool, "edit");
+  assert.equal(episodes[0]!.matches[0]!.routingAllowed, true, "edit -> write stays within filesystem mutation");
+  assert.deepEqual(episodes[0]!.shape, { content: "string", path: "string" });
+  assert.deepEqual(episodes[0]!.declaredKeys, []);
+});
+
+test("mining reads the failed call's own arguments, not the rendered Received arguments", () => {
+  const mismatch = 'Validation failed for tool "write":\n  - content: Required\n\nReceived arguments:\n{\n  "command": "ls"\n}';
+  const events: RoutingEvent[] = [
+    ...call("f1", "write", { command: "ls", timeout: 1000 }, 0),
+    ...result("f1", true, mismatch, 0, "write"),
+  ];
+  const episode = extractRoutingEpisodes("s", events).episodes[0]!;
+  assert.deepEqual(episode.shape, { command: "string", timeout: "number" }, "shape comes from the tool call input");
+  assert.equal(episode.kind, "unique-exact", "bash uniquely accepts the command/timeout shape");
+  assert.equal(episode.matches[0]!.tool, "bash");
+  assert.equal(episode.matches[0]!.routingAllowed, false, "write -> bash is a capability escalation and stays blocked");
+});
+
+test("CLI stderr and mismatched headers are never mined as tool-arg validation", () => {
+  const cargo = "error: unexpected argument '--no-docker' found\n\nUsage: tree-sitter build\n  tip: a similar argument exists";
+  const vitest = "\n RUN  v4.1.5 /repo\n\n ❯ bin/smoke.test.ts (34 tests | 7 failed)\n   × invalid parameter NAME";
+  const mismatched = 'Validation failed for tool "read":\n  - path: Required';
+
+  const cargoEvents: RoutingEvent[] = [ ...call("f1", "bash", { command: "tree-sitter build", timeout: 1000 }, 0), ...result("f1", true, cargo, 0, "bash") ];
+  assert.equal(extractRoutingEpisodes("s", cargoEvents).attrition.mined, 0, "cargo stderr is not a tool-arg error");
+
+  const vitestEvents: RoutingEvent[] = [ ...call("f1", "bash", { command: "vitest run", timeout: 1000 }, 0), ...result("f1", true, vitest, 0, "bash") ];
+  assert.equal(extractRoutingEpisodes("s", vitestEvents).attrition.mined, 0, "vitest output is not a tool-arg error");
+
+  const mismatchedEvents: RoutingEvent[] = [ ...call("f1", "bash", { command: "ls", timeout: 1000 }, 0), ...result("f1", true, mismatched, 0, "bash") ];
+  assert.equal(extractRoutingEpisodes("s", mismatchedEvents).attrition.mined, 0, "a header naming another tool rejects the call");
 });
 
 test("the request carries only keys, types, declared keys, and candidate tool IDs", () => {

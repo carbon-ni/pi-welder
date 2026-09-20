@@ -150,16 +150,32 @@ const SCHEMA_FAILURE_PATTERNS: readonly RegExp[] = [
   /invalid_options/i,
 ];
 
-/**
- * Validation/schema failure class only; execution and domain errors are
- * excluded. A tool-arg validation error is a short, single-line message; a
- * multiline result is command output (for example cargo's "unexpected
- * argument") and must never be mined.
- */
+/** Anchored Pi tool-arg validation header, e.g. `Validation failed for tool "write":`. */
+export const PI_VALIDATION_HEADER = /^\s*Validation failed for tool "([A-Za-z0-9_.-]{1,60})":/;
+/** A header-bearing message includes the rendered arguments and can be large. */
+export const PI_VALIDATION_MAX_LENGTH = 50_000;
+/** Legacy single-line messages are short. */
 export const VALIDATION_ERROR_MAX_LENGTH = 300;
 
-export function isValidationFailure(errorText: string | undefined): boolean {
+/** Tool named by the anchored Pi validation header, or undefined. */
+export function piValidationTool(errorText: string | undefined): string | undefined {
+  if (!errorText || errorText.length > PI_VALIDATION_MAX_LENGTH) return undefined;
+  return PI_VALIDATION_HEADER.exec(errorText)?.[1];
+}
+
+/**
+ * Tool-arg validation class only; execution and domain errors are excluded.
+ *
+ * A Pi validation failure starts with the anchored header and names the tool
+ * it belongs to, so a header naming a different tool rejects the call. Without
+ * a header the message must be short and single-line: multiline results are
+ * command output (cargo "unexpected argument", vitest reports) and are never
+ * mined.
+ */
+export function isValidationFailure(errorText: string | undefined, attemptedTool?: string): boolean {
   if (!errorText) return false;
+  const headerTool = piValidationTool(errorText);
+  if (headerTool !== undefined) return attemptedTool === undefined || headerTool === attemptedTool;
   if (errorText.includes("\n") || errorText.length > VALIDATION_ERROR_MAX_LENGTH) return false;
   return SCHEMA_FAILURE_PATTERNS.some((pattern) => pattern.test(errorText));
 }
