@@ -42,7 +42,10 @@ async function writeSettings(home: string, settings: WelderSettings): Promise<vo
  * the factory runs, so HOME stays active for both and the developer's real
  * `~/.pi/agent/welder.json` can never influence the outcome.
  */
-async function loadExtension(settings: WelderSettings = { repairsEnabled: true, commandReroutingEnabled: true }, options: { fresh?: boolean } = {}): Promise<Captured> {
+async function loadExtension(
+  settings: WelderSettings = { repairsEnabled: true, commandReroutingEnabled: true },
+  options: { fresh?: boolean; apiKey?: string | null } = {},
+): Promise<Captured> {
   tempHome ??= await fs.mkdtemp(path.join(os.tmpdir(), "welder-home-"));
   await writeSettings(tempHome, settings);
 
@@ -53,14 +56,23 @@ async function loadExtension(settings: WelderSettings = { repairsEnabled: true, 
     registerTool(tool: any) { captured.tools.push(tool); },
   };
 
+  // The capability that enables non-exact classification is created only when
+  // this key exists, so it is set and restored here rather than inherited from
+  // the ambient environment.
+  const apiKey = options.apiKey === undefined ? "test-key" : options.apiKey;
   const previousHome = process.env.HOME;
+  const previousKey = process.env.TYPESAFE_API_KEY;
   process.env.HOME = tempHome;
+  if (apiKey === null) delete process.env.TYPESAFE_API_KEY;
+  else process.env.TYPESAFE_API_KEY = apiKey;
   try {
     const url = options.fresh === true ? `../index.ts?instance=${++importCount}` : "../index.ts";
     const module = await import(url);
     (module.default as (pi: ExtensionHost) => void)(api as any);
   } finally {
     process.env.HOME = previousHome;
+    if (previousKey === undefined) delete process.env.TYPESAFE_API_KEY;
+    else process.env.TYPESAFE_API_KEY = previousKey;
   }
   return captured;
 }
@@ -178,4 +190,16 @@ test("the composition root reads settings from HOME, so a developer's real confi
   await enabled.handlers["session_start"]?.(undefined, context(process.cwd()));
   const sentinel = enabledWrite.prepareArguments!({ CMD: "printf jev-isolation" }) as { path?: string };
   assert.equal(typeof sentinel.path, "string", "the HOME settings enable routing");
+
+  // And with no key at invocation the same enabled config cannot classify,
+  // which proves the environment is read here and not inherited.
+  const keyless = await loadExtension({ repairsEnabled: true, commandReroutingEnabled: true }, { fresh: true, apiKey: null });
+  const keylessWrite = keyless.tools.find((tool) => tool.name === "write");
+  assert.ok(keylessWrite);
+  await keyless.handlers["session_start"]?.(undefined, context(process.cwd()));
+  assert.deepEqual(
+    keylessWrite.prepareArguments!({ CMD: "printf jev-isolation" }),
+    { CMD: "printf jev-isolation" },
+    "without a key there is no classifier, so nothing is routed",
+  );
 });
