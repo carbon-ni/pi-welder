@@ -1,7 +1,7 @@
 ---
 id: TASK-0036
 title: Generalize probabilistic routing to arbitrary tool field mappings
-status: doing
+status: done
 depends_on: [TASK-0033, TASK-0034, TASK-0035]
 priority: high
 tags: [routing, schemas, field-mapping, jeq, shadow, generalization]
