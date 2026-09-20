@@ -116,6 +116,8 @@ export function mineSummary(result: MineResult): string {
  */
 export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig): void {
   runtime.modelRepairReportingEnabled = current.modelRepairReportingEnabled;
+  // TASK-0039: the read-path repair reads this field live on every tool call.
+  runtime.readPathRepairEnabled = current.readPathRepairEnabled;
   setRepairsEnabled(runtime, current.repairsEnabled);
   setDisabledRepairs(runtime, current.disabledRepairs);
   setCommandReroutingEnabled(runtime, current.commandReroutingEnabled);

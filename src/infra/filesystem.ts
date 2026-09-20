@@ -2,6 +2,8 @@ import { readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 
 export interface FileInfo {
   isDirectory(): boolean;
+  /** Optional: when present, callers can bound work before reading a file. */
+  size?: number;
 }
 
 export interface DirectoryEntry extends FileInfo {

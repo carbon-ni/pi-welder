@@ -1,10 +1,14 @@
 /**
  * TASK-0022 — predeclared evidence gate for read-path auto-repair.
  *
- * Auto-mutation may run ONLY when this gate passes. The gate is fixed before
- * evaluation: at least 30 reviewed labels, precision >= 0.99 at the 0.9
- * confidence threshold, and zero wrong-target selections. The frozen verdict
- * below is the committed outcome of the offline evaluation.
+ * HISTORICAL EVIDENCE ONLY (TASK-0039): this gate is no longer wired to runtime
+ * behavior. Read-path mutation is enabled by the explicit readPathRepairEnabled
+ * setting plus an available client. The rule and verdict below stay as the
+ * committed record of the offline evaluation.
+ *
+ * The gate was fixed before evaluation: at least 30 reviewed labels,
+ * precision >= 0.99 at the 0.9 confidence threshold, and zero wrong-target
+ * selections. The frozen verdict below is the committed outcome.
  */
 
 export const READ_PATH_GATE = Object.freeze({
@@ -52,9 +56,8 @@ export function evaluateReadPathGate(evidence: ReadPathEvidence): ReadPathVerdic
  * reached top-1 8.6% / top-5 14.5% **over those 747**. The bounded Jev probe
  * (cap 200 = 179 unresolved + 21 evaluated = 7 selected + 3 abstain +
  * 11 low-confidence, 2s timeout, zero retries) produced 2 wrong-target
- * selections and zero human-reviewed labels. The gate therefore FAILS and
- * runtime auto-mutation stays disabled; only shadow-only eligibility
- * instrumentation runs.
+ * selections and zero human-reviewed labels. The gate therefore FAILS. This
+ * verdict is kept as evidence, not as a runtime switch.
  */
 export const READ_PATH_EVIDENCE: ReadPathVerdict = evaluateReadPathGate({
   pairs: 1411,

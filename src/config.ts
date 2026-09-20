@@ -10,8 +10,9 @@ export interface WelderConfig {
   sourceShadowingEnabled: boolean;
   /**
    * TASK-0022 opt-in: repair missing read paths via bounded Jev ranking.
-   * Default OFF and independent of source-shadow consent; runtime mutation
-   * additionally requires the predeclared evidence gate to pass.
+   * Default OFF and independent of source-shadow consent. TASK-0039: this
+   * setting plus an available client enable mutation; the predeclared evidence
+   * gate is historical evidence only (see read-recovery/evidence-gate.ts).
    */
   readPathRepairEnabled: boolean;
   /**

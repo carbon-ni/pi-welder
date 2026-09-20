@@ -205,3 +205,27 @@ test("syncRuntimeConfig applies the live bash-routing gate without a restart", a
   syncRuntimeConfig(runtime, { ...base, commandReroutingEnabled: true });
   assert.equal(runtime.bashRouteState.isEnabled(), true, "re-enabling restores routing");
 });
+
+test("syncRuntimeConfig toggles read-path repair live in both directions", async () => {
+  const { createRuntime } = await import("./runtime.ts");
+  const { syncRuntimeConfig } = await import("./commands.ts");
+  const runtime = createRuntime({ readPathRepairEnabled: false });
+
+  const base = {
+    modelRepairReportingEnabled: false,
+    recoveryGuidanceLimit: 3,
+    repairsEnabled: true,
+    disabledRepairs: [] as string[],
+    sourceShadowingEnabled: false,
+    readPathRepairEnabled: false,
+    commandReroutingEnabled: false,
+  };
+
+  assert.equal(runtime.readPathRepairEnabled, false);
+
+  syncRuntimeConfig(runtime, { ...base, readPathRepairEnabled: true });
+  assert.equal(runtime.readPathRepairEnabled, true, "enabled without a restart");
+
+  syncRuntimeConfig(runtime, { ...base, readPathRepairEnabled: false });
+  assert.equal(runtime.readPathRepairEnabled, false, "and disabled again without a restart");
+});

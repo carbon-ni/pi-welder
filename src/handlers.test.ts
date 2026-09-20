@@ -357,6 +357,39 @@ test("read-path repair leaves the call unchanged on abstain, low confidence, fai
   }
 });
 
+test("disabling read-path repair stops client requests immediately", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "config.ts"), "x");
+  const { syncRuntimeConfig } = await import("./commands.ts");
+  let calls = 0;
+  const runtime = createRuntime({
+    readPathRepairEnabled: true,
+    readPathClient: { choose: async () => { calls++; return { choice: 1, confidence: 0.99 }; } } as any,
+  });
+
+  const first = { toolName: "read", toolCallId: "c1", input: { path: "src/confg.ts" } };
+  await handleToolCall(runtime, first as any, ctx({ cwd: root }));
+  assert.equal(calls, 1);
+  assert.equal(first.input.path, "src/config.ts");
+
+  syncRuntimeConfig(runtime, {
+    modelRepairReportingEnabled: false,
+    recoveryGuidanceLimit: 3,
+    repairsEnabled: true,
+    disabledRepairs: [],
+    sourceShadowingEnabled: false,
+    readPathRepairEnabled: false,
+    commandReroutingEnabled: false,
+  });
+
+  const second = { toolName: "read", toolCallId: "c2", input: { path: "src/confg.ts" } };
+  await handleToolCall(runtime, second as any, ctx({ cwd: root }));
+
+  assert.equal(calls, 1, "no request after the setting is turned off");
+  assert.deepEqual(second.input, { path: "src/confg.ts" }, "and no mutation");
+});
+
 test("read-path repair never mutates non-read tools or eligibility-failing reads", async () => {
   const runtime = createRuntime({ readPathRepairEnabled: true, readPathClient: { choose: async () => ({ choice: 1, confidence: 0.99 }) } as any });
   const editEvent = { toolName: "edit", toolCallId: "c", input: { path: "src/confg.ts" } };

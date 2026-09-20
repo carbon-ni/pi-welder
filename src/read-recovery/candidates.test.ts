@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   MAX_PATH_CANDIDATES,
+  MAX_POSTCHECK_PROBE_BYTES,
   generateReadPathCandidates,
   rankPathCandidates,
   validateCandidatePath,
@@ -125,4 +126,43 @@ test("validateCandidatePath re-checks containment and readability", async () => 
       await rm(outside, { recursive: true, force: true });
     }
   });
+});
+
+test("the postcheck bounds its readability probe when stat reports a size", async () => {
+  const reads: string[] = [];
+  const oversized = {
+    realpath: async (target: string) => target,
+    stat: async () => ({ isDirectory: () => false, size: MAX_POSTCHECK_PROBE_BYTES + 1 }),
+    readFile: async (target: string) => { reads.push(target); return "huge"; },
+  } as any;
+
+  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/big.ts", fileSystem: oversized }), "src/big.ts");
+  assert.equal(reads.length, 0, "an oversized candidate is never read into memory");
+
+  const small = {
+    realpath: async (target: string) => target,
+    stat: async () => ({ isDirectory: () => false, size: 12 }),
+    readFile: async (target: string) => { reads.push(target); return "small"; },
+  } as any;
+
+  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/small.ts", fileSystem: small }), "src/small.ts");
+  assert.equal(reads.length, 1, "a bounded candidate is still probed for readability");
+
+  const unreadable = {
+    realpath: async (target: string) => target,
+    stat: async () => ({ isDirectory: () => false, size: 12 }),
+    readFile: async () => { throw new Error("EACCES"); },
+  } as any;
+
+  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/locked.ts", fileSystem: unreadable }), undefined);
+
+  const unknownSize = {
+    realpath: async (target: string) => target,
+    stat: async () => ({ isDirectory: () => false }),
+    readFile: async (target: string) => { reads.push(target); return "ok"; },
+  } as any;
+
+  const before = reads.length;
+  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/unknown.ts", fileSystem: unknownSize }), "src/unknown.ts");
+  assert.equal(reads.length, before + 1, "unknown size keeps the documented readability read");
 });
