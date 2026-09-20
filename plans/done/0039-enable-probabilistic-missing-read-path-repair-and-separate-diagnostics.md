@@ -1,7 +1,7 @@
 ---
 id: TASK-0039
 title: Enable probabilistic missing-read path repair and separate diagnostics
-status: doing
+status: done
 depends_on: [TASK-0022]
 priority: high
 tags: [read, jev, auto-repair, diagnostics, stats]
