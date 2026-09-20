@@ -28,7 +28,11 @@ import {
   evaluateRouting,
   parseRoutingResponse,
   routingOptions,
+  replayFrozenRun,
   routingRequestPrivacyPasses,
+  wilsonInterval,
+  type FrozenCase,
+  type FrozenRequest,
   type RoutingMetrics,
   type RoutingOutcome,
 } from "../src/tool-routing/evaluation.ts";
@@ -268,6 +272,82 @@ async function commandRun(args: Args): Promise<void> {
   }, null, 2));
 }
 
+/**
+ * Rebuilds the evidence tables from a saved run (audit + requests) so every
+ * number shares the run's corpus hash. No model call, no live corpus read.
+ */
+async function commandReplay(args: Args): Promise<void> {
+  const reportPath = path.join(args.out, "report.json");
+  const report = JSON.parse(await fs.readFile(reportPath, "utf8"));
+  const entries = (await fs.readdir(args.out)).filter((name) => name.startsWith("audit-") && name.endsWith(".jsonl"));
+  const cases: FrozenCase[] = [];
+  const requestRefs = new Set<string>();
+  for (const name of entries.sort()) {
+    for (const line of (await fs.readFile(path.join(args.out, name), "utf8")).split("\n")) {
+      if (!line) continue;
+      const record = JSON.parse(line);
+      cases.push(record);
+      requestRefs.add(record.requestRef);
+    }
+  }
+  const requests = new Map<string, FrozenRequest>();
+  for (const ref of requestRefs) {
+    const request = JSON.parse(await fs.readFile(path.join(args.out, ref), "utf8"));
+    requests.set(ref, { failedTool: request.state.failedTool, candidateTools: request.state.candidateTools });
+  }
+
+  const replay = replayFrozenRun(cases, requests);
+  const at90 = report.jeq?.overall?.thresholds?.find((entry: { threshold: number }) => entry.threshold === 0.9);
+  report.reroutePairs = Object.fromEntries(replay.pairs.map((pair) => [pair.pair, pair.cases]));
+  report.frozenReplay = {
+    source: "frozen audit + saved requests (same corpus hash)",
+    corpusHash: report.corpus?.hash,
+    ...replay,
+    perPairWilsonLower: Object.fromEntries(replay.pairs.map((pair) => [pair.pair, pair.wilsonLower])),
+    manualReviewNeeded: 0,
+  };
+  report.verdicts = {
+    probabilistic: { verdict: "reject", reason: `selections at 0.90: ${at90?.selections ?? 0} < ${ROUTING_PROMOTION_GATE.minSelections} (zero wrong required)` },
+    deterministicUniqueNonEscalating: {
+      verdict: "candidate",
+      numerator: replay.allowed.correct,
+      denominator: replay.allowed.cases,
+      precision: replay.allowed.precision,
+      wilsonLower: replay.allowed.wilsonLower,
+      reason: "unique schema match, target capability equal or lower; deterministic, no model",
+    },
+    escalationBlocked: {
+      verdict: "blocked",
+      numerator: replay.blocked.correct,
+      denominator: replay.blocked.cases,
+      wilsonLower: replay.blocked.wilsonLower,
+      reason: "target capability is stronger than the failed tool; never rerouted regardless of confidence",
+    },
+  };
+  report.run = { ...report.run, replayedAt: new Date().toISOString() };
+
+  await fs.writeFile(reportPath, JSON.stringify(report, null, 2) + "\n");
+  // Keep the snapshot in the same-hash pair as the report it now explains.
+  const snapshotPath = path.join(args.out, "snapshot.json");
+  const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8"));
+  snapshot.frozenReplay = {
+    source: "same run as report.json",
+    reroutePairs: report.reroutePairs,
+    caseCount: replay.evaluated,
+    precision: replay.precision,
+    wilsonLower: replay.wilsonLower,
+    allowed: replay.allowed,
+    blocked: replay.blocked,
+    oneCasePerSession: replay.oneCasePerSession,
+    allowedExistingReadShape: replay.allowedExistingReadShape,
+    allowedNewPairCases: replay.allowedNewPairCases,
+  };
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot, null, 2) + "\n");
+
+  console.log(JSON.stringify({ caseCount: replay.evaluated, precision: replay.precision, wilsonLower: replay.wilsonLower, pairs: replay.pairs, allowed: replay.allowed, blocked: replay.blocked, ambiguousCases: replay.ambiguousCases, oneCasePerSession: replay.oneCasePerSession, allowedExistingReadShape: replay.allowedExistingReadShape, allowedNewPairCases: replay.allowedNewPairCases, verdicts: report.verdicts, corpusHash: report.corpus?.hash }, null, 1));
+}
+
 const args = parseArgs(process.argv.slice(2));
 if (args.command === "run") await commandRun(args);
-else throw new Error(`Unknown command ${args.command} (use: run)`);
+else if (args.command === "replay") await commandReplay(args);
+else throw new Error(`Unknown command ${args.command} (use: run, replay)`);

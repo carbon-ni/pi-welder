@@ -268,6 +268,125 @@ export function deterministicChoiceFor(episode: RoutingEpisode): string | undefi
   return deterministicChoice(episode.matches);
 }
 
+export interface WilsonInterval { successes: number; total: number; lower: number; upper: number }
+
+/** Wilson score interval (95% by default); exact for small n and p=1. */
+export function wilsonInterval(successes: number, total: number, z = 1.96): WilsonInterval {
+  if (total <= 0) return { successes, total: 0, lower: 0, upper: 1 };
+  const p = successes / total;
+  const zSquared = z * z;
+  const denominator = 1 + zSquared / total;
+  const center = p + zSquared / (2 * total);
+  const margin = z * Math.sqrt((p * (1 - p)) / total + zSquared / (4 * total * total));
+  return { successes, total, lower: Math.max(0, (center - margin) / denominator), upper: Math.min(1, (center + margin) / denominator) };
+}
+
+export interface FrozenCase {
+  caseId: string;
+  sessionId: string;
+  requestRef: string;
+  kind: string;
+  candidates: string[];
+  expectedTool: string;
+  status: string;
+  choice?: string;
+  confidence?: number;
+}
+
+export interface FrozenRequest { failedTool: string; candidateTools: string[] }
+
+export interface PairStat {
+  pair: string;
+  cases: number;
+  correct: number;
+  precision: number;
+  wilsonLower: number;
+  routingAllowed: boolean;
+}
+
+export interface FrozenReplay {
+  evaluated: number;
+  correct: number;
+  precision: number;
+  wilsonLower: number;
+  pairs: PairStat[];
+  allowed: { cases: number; correct: number; precision: number; wilsonLower: number };
+  blocked: { cases: number; correct: number; precision: number; wilsonLower: number };
+  ambiguousCases: number;
+  oneCasePerSession: { sessions: number; correct: number; precision: number; wilsonLower: number };
+  allowedExistingReadShape: number;
+  allowedNewPairCases: number;
+}
+
+/**
+ * Rebuilds evidence from a frozen run (saved audit + saved requests) without
+ * touching the live corpus, so every number shares one corpus hash. The source
+ * tool comes from the saved request; capability policy is re-applied here.
+ */
+export function replayFrozenRun(cases: readonly FrozenCase[], requests: ReadonlyMap<string, FrozenRequest>): FrozenReplay {
+  const isCorrect = (entry: FrozenCase): boolean => entry.status === "answered" && entry.choice !== undefined && entry.choice === entry.expectedTool;
+  const pairs = new Map<string, { cases: number; correct: number; allowed: boolean }>();
+  const perSession = new Map<string, boolean>();
+  let evaluated = 0;
+  let correct = 0;
+  let ambiguousCases = 0;
+  let allowedCases = 0;
+  let allowedCorrect = 0;
+  let blockedCases = 0;
+  let blockedCorrect = 0;
+  let allowedExistingReadShape = 0;
+  let allowedNewPairCases = 0;
+
+  for (const entry of cases) {
+    evaluated++;
+    const ok = isCorrect(entry);
+    if (ok) correct++;
+    if (entry.candidates.length > 1) ambiguousCases++;
+
+    const request = requests.get(entry.requestRef);
+    const source = request?.failedTool;
+    const allowed = source === undefined ? false : isRoutingAllowed(source, capabilityOf(entry.expectedTool) as Capability);
+    if (!perSession.has(entry.sessionId)) perSession.set(entry.sessionId, ok);
+
+    if (source !== undefined) {
+      const pair = `${source}->${entry.expectedTool}`;
+      const current = pairs.get(pair) ?? { cases: 0, correct: 0, allowed: isRoutingAllowed(source, capabilityOf(entry.expectedTool) as Capability) };
+      current.cases++;
+      if (ok) current.correct++;
+      pairs.set(pair, current);
+    }
+
+    if (allowed) {
+      allowedCases++;
+      if (ok) allowedCorrect++;
+      const pair = `${source}->${entry.expectedTool}`;
+      if (pair === "edit->read") allowedExistingReadShape++;
+      else allowedNewPairCases++;
+    } else {
+      blockedCases++;
+      if (ok) blockedCorrect++;
+    }
+  }
+
+  const sessionValues = [...perSession.values()];
+  const sessionCorrect = sessionValues.filter(Boolean).length;
+  return {
+    evaluated,
+    correct,
+    precision: evaluated === 0 ? 0 : correct / evaluated,
+    wilsonLower: wilsonInterval(correct, evaluated).lower,
+    pairs: [...pairs.entries()]
+      .map(([pair, value]) => ({ pair, cases: value.cases, correct: value.correct, precision: value.cases === 0 ? 0 : value.correct / value.cases, wilsonLower: wilsonInterval(value.correct, value.cases).lower, routingAllowed: value.allowed }))
+      .sort((a, b) => b.cases - a.cases || a.pair.localeCompare(b.pair)),
+    allowed: { cases: allowedCases, correct: allowedCorrect, precision: allowedCases === 0 ? 0 : allowedCorrect / allowedCases, wilsonLower: wilsonInterval(allowedCorrect, allowedCases).lower },
+    blocked: { cases: blockedCases, correct: blockedCorrect, precision: blockedCases === 0 ? 0 : blockedCorrect / blockedCases, wilsonLower: wilsonInterval(blockedCorrect, blockedCases).lower },
+    ambiguousCases,
+    oneCasePerSession: { sessions: perSession.size, correct: sessionCorrect, precision: perSession.size === 0 ? 0 : sessionCorrect / perSession.size, wilsonLower: wilsonInterval(sessionCorrect, perSession.size).lower },
+    allowedExistingReadShape,
+    allowedNewPairCases,
+  };
+}
+
 export type RoutingVerdict = "promote" | "reject" | "shadow-only";
 
 export const ROUTING_PROMOTION_GATE = Object.freeze({

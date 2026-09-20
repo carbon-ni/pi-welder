@@ -29,6 +29,8 @@ import { extractRoutingEpisodes, type RoutingEvent } from "./episode.ts";
 import { parseRoutingSessionText } from "./session.ts";
 import {
   ROUTING_PROMOTION_GATE,
+  replayFrozenRun,
+  wilsonInterval,
   buildRoutingRequest,
   decideRouting,
   deterministicChoiceFor,
@@ -429,6 +431,47 @@ test("the deterministic baseline choice is derived from the episode candidates",
   const shape = shapeOf({ command: "x" });
   const episode = { episodeId: "e", sessionId: "s", sourceTool: "write", shape, declaredKeys: [], matches: candidateMatches("write", shape), kind: classifyMatch(candidateMatches("write", shape)), labelTool: "bash", labelKind: "reroute" as const };
   assert.equal(deterministicChoiceFor(episode), "bash");
+});
+
+test("the Wilson lower bound is exact for 195/195 and degrades with small n", () => {
+  const perfect = wilsonInterval(195, 195);
+  assert.equal(perfect.lower > 0.98 && perfect.lower < 0.982, true, `expected ~0.9807, got ${perfect.lower}`);
+  assert.equal(perfect.upper, 1);
+  const half = wilsonInterval(5, 10);
+  assert.equal(half.lower > 0.236 && half.lower < 0.237, true, `expected ~0.2366, got ${half.lower}`);
+  const empty = wilsonInterval(0, 0);
+  assert.deepEqual(empty, { successes: 0, total: 0, lower: 0, upper: 1 });
+  assert.equal(wilsonInterval(0, 10).lower, 0);
+});
+
+test("the frozen replay derives pairs, capability split, and per-session precision", () => {
+  const cases = [
+    { caseId: "1", sessionId: "s1", requestRef: "requests/unique-audit/000.json", kind: "unique-exact", candidates: ["read"], expectedTool: "read", status: "answered", choice: "read", confidence: 0.5 },
+    { caseId: "2", sessionId: "s1", requestRef: "requests/unique-audit/001.json", kind: "unique-exact", candidates: ["read"], expectedTool: "read", status: "answered", choice: "read", confidence: 0.6 },
+    { caseId: "3", sessionId: "s2", requestRef: "requests/unique-audit/002.json", kind: "unique-exact", candidates: ["bash"], expectedTool: "bash", status: "answered", choice: "bash", confidence: 0.8 },
+    { caseId: "4", sessionId: "s3", requestRef: "requests/unique-audit/003.json", kind: "unique-exact", candidates: ["write"], expectedTool: "write", status: "answered", choice: "read", confidence: 0.9 },
+  ];
+  const requests = new Map([
+    ["requests/unique-audit/000.json", { failedTool: "edit", candidateTools: ["read"] }],
+    ["requests/unique-audit/001.json", { failedTool: "edit", candidateTools: ["read"] }],
+    ["requests/unique-audit/002.json", { failedTool: "read", candidateTools: ["bash"] }],
+    ["requests/unique-audit/003.json", { failedTool: "edit", candidateTools: ["write"] }],
+  ]);
+  const replay = replayFrozenRun(cases, requests);
+  assert.equal(replay.evaluated, 4);
+  assert.equal(replay.correct, 3);
+  assert.equal(replay.precision, 0.75);
+  assert.deepEqual(replay.pairs.map((pair) => [pair.pair, pair.cases, pair.correct, pair.routingAllowed]), [
+    ["edit->read", 2, 2, true],
+    ["edit->write", 1, 0, true],
+    ["read->bash", 1, 1, false],
+  ]);
+  assert.deepEqual(replay.allowed, { cases: 3, correct: 2, precision: 2 / 3, wilsonLower: wilsonInterval(2, 3).lower });
+  assert.deepEqual(replay.blocked, { cases: 1, correct: 1, precision: 1, wilsonLower: wilsonInterval(1, 1).lower });
+  assert.equal(replay.ambiguousCases, 0);
+  assert.deepEqual(replay.oneCasePerSession, { sessions: 3, correct: 2, precision: 2 / 3, wilsonLower: wilsonInterval(2, 3).lower });
+  assert.equal(replay.allowedExistingReadShape, 2);
+  assert.equal(replay.allowedNewPairCases, 1);
 });
 
 test("the session parser keeps argument keys and types without values in episodes", () => {
