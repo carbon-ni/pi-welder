@@ -68,8 +68,9 @@ export default function (pi: ExtensionHost) {
     // Client exists whenever an API key is present, so the setting can be
     // toggled on live; sourceShadowingEnabled alone controls actual use.
     jevClient: apiKey ? createTypeSafeJevClient({ apiKey }) : undefined,
-    // Read-path repair uses its own question/instructions and is gated by the
-    // readPathRepairEnabled setting plus the frozen evidence verdict.
+    // Read-path repair uses its own question/instructions. TASK-0039: the
+    // readPathRepairEnabled setting plus this client enable it; the frozen
+    // evidence verdict is historical only (read-recovery/evidence-gate.ts).
     readPathClient: apiKey ? createTypeSafeJevClient({ apiKey, prompt: READ_PATH_PROMPT }) : undefined,
   });
 

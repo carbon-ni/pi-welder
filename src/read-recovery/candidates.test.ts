@@ -136,8 +136,17 @@ test("the postcheck bounds its readability probe when stat reports a size", asyn
     readFile: async (target: string) => { reads.push(target); return "huge"; },
   } as any;
 
-  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/big.ts", fileSystem: oversized }), "src/big.ts");
+  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/big.ts", fileSystem: oversized }), undefined);
   assert.equal(reads.length, 0, "an oversized candidate is never read into memory");
+
+  const oversizedUnreadable = {
+    realpath: async (target: string) => target,
+    stat: async () => ({ isDirectory: () => false, size: MAX_POSTCHECK_PROBE_BYTES + 1 }),
+    readFile: async () => { reads.push("unreachable"); throw new Error("EACCES"); },
+  } as any;
+
+  assert.equal(await validateCandidatePath({ cwd: "/root", candidatePath: "src/huge-locked.ts", fileSystem: oversizedUnreadable }), undefined);
+  assert.equal(reads.length, 0, "an oversized candidate fails closed without a read, readable or not");
 
   const small = {
     realpath: async (target: string) => target,

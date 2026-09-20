@@ -168,7 +168,7 @@ export async function generateReadPathCandidates(options: {
 }
 
 /** Validates a selected candidate: contained realpath plus readable regular file. */
-/** Largest file the postcheck reads. Larger candidates skip the content probe. */
+/** Largest file the postcheck reads. A larger known size fails closed. */
 export const MAX_POSTCHECK_PROBE_BYTES = 1_048_576;
 
 export async function validateCandidatePath(options: {
@@ -190,14 +190,12 @@ export async function validateCandidatePath(options: {
   const info = await fileSystem.stat(realCandidate).catch(() => undefined);
   if (!info || info.isDirectory()) return undefined;
   // TASK-0039: never pull an unbounded file into memory for the readability
-  // probe. When `stat` reports a size we probe only files at or below the cap;
-  // larger files pass on regular-file + containment grounds and the read tool
-  // enforces readability itself. Unknown size keeps the read as the documented
-  // fallback for injected filesystems.
+  // probe, and never accept a file we could not probe. A known size above the
+  // cap fails closed: no read, no mutation. Unknown size keeps the read as the
+  // documented fallback for injected filesystems.
   const knownSize = typeof info.size === "number" && Number.isFinite(info.size) ? info.size : undefined;
-  if (knownSize === undefined || knownSize <= MAX_POSTCHECK_PROBE_BYTES) {
-    const content = await fileSystem.readFile(realCandidate).catch(() => undefined);
-    if (content === undefined) return undefined;
-  }
+  if (knownSize !== undefined && knownSize > MAX_POSTCHECK_PROBE_BYTES) return undefined;
+  const content = await fileSystem.readFile(realCandidate).catch(() => undefined);
+  if (content === undefined) return undefined;
   return requested;
 }
