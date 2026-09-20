@@ -1,7 +1,7 @@
 ---
 id: TASK-0040
 title: Prevent Bash classification of valid source-tool calls
-status: doing
+status: done
 depends_on: [TASK-0038]
 priority: high
 tags: [bash, routing, regression, schema, read]
