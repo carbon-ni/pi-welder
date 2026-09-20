@@ -2,13 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { MAX_MISMATCH_CANDIDATES, candidateFeatures, generateMismatchCandidates, labelOrdinal } from "./candidates.ts";
-import { extractMismatchCases, type EditEvent } from "./episode.ts";
+import { boundedPriorSignals, extractMismatchCases, PRIOR_EVENT_WINDOW, type EditEvent } from "./episode.ts";
 import { parseSessionText } from "./session.ts";
 import {
   MISMATCH_PROMOTION_GATE,
   buildMismatchRequest,
   candidateOptions,
-  computeRecall,
+  computeCandidateCoverage,
   decideMismatch,
   evaluateMismatch,
   parseMismatchResponse,
@@ -179,23 +179,73 @@ test("metrics include baseline comparison, calibration, and abstention", () => {
   assert.equal(metrics.calibration.find((bucket) => bucket.id === ">=0.99")!.accuracy, 0.5);
 });
 
-test("recall and the promotion gate reject low recall, insufficient cases, and any wrong selection", () => {
-  const recall = computeRecall([{ labelOrdinal: 1 }, { labelOrdinal: 2 }, { labelOrdinal: undefined }, { labelOrdinal: 4 }]);
-  assert.equal(recall.top1, 1);
-  assert.equal(recall.top5, 3);
-  assert.equal(recall.top1Recall, 0.25);
-  assert.equal(recall.top5Recall, 0.75);
+test("prior signals are bounded to three events before the call and never read future results", () => {
+  // Parallel ordering: the failed call's window must not include results that
+  // physically land after it, even though their calls precede it.
+  const events: EditEvent[] = [
+    { id: "c0", ts: "t", kind: "toolCall", toolName: "read", toolCallId: "c0", path: "src/x.ts" },
+    { id: "c1", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "c1", path: "src/a.ts", oldText: "anchor" },
+    { id: "r1", ts: "t", kind: "toolResult", toolCallId: "c1", isError: true, errorText: "Could not find edits[0]. The oldText must match exactly." },
+    { id: "c2", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "c2", path: "src/a.ts", oldText: "  anchor" },
+    { id: "r2", ts: "t", kind: "toolResult", toolCallId: "c2", isError: false },
+    { id: "r0", ts: "t", kind: "toolResult", toolCallId: "c0", isError: false },
+  ];
+  const prior = boundedPriorSignals(events, 1);
+  assert.deepEqual(prior, { priorEditAttempts: 0, priorErrorCalls: 0, priorOkCalls: 0 }, "only the read call precedes the target");
+
+  // Counters never exceed the window size.
+  const many: EditEvent[] = Array.from({ length: 10 }, (_, index) => ({ id: `r${index}`, ts: "t", kind: "toolResult", toolCallId: `c${index}`, isError: index % 2 === 0 }));
+  const bounded = boundedPriorSignals(many, many.length);
+  assert.equal(bounded.priorErrorCalls + bounded.priorOkCalls <= PRIOR_EVENT_WINDOW, true);
+});
+
+test("prior signals count only the immediate pre-failure window", () => {
+  const events: EditEvent[] = [
+    { id: "c0", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "c0", path: "src/a.ts", oldText: "x" },
+    { id: "r0", ts: "t", kind: "toolResult", toolCallId: "c0", isError: false },
+    { id: "c1", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "c1", path: "src/a.ts", oldText: "anchor" },
+    { id: "r1", ts: "t", kind: "toolResult", toolCallId: "c1", isError: true, errorText: "Could not find edits[0]. The oldText must match exactly." },
+    { id: "c2", ts: "t", kind: "toolCall", toolName: "edit", toolCallId: "c2", path: "src/a.ts", oldText: "  anchor" },
+    { id: "r2", ts: "t", kind: "toolResult", toolCallId: "c2", isError: false },
+  ];
+  const cases = extractMismatchCases("s", events);
+  assert.deepEqual(cases[0]!.prior, { priorEditAttempts: 1, priorErrorCalls: 0, priorOkCalls: 1 });
+});
+
+test("coverage and conditional recall are separate; the gate uses coverage", () => {
+  const coverage = computeCandidateCoverage([{ labelOrdinal: 1 }, { labelOrdinal: 2 }, { labelOrdinal: undefined }, { labelOrdinal: undefined }]);
+  assert.equal(coverage.cases, 4);
+  assert.equal(coverage.labelable, 2);
+  assert.equal(coverage.coverage, 0.5, "labelable / all mined candidate cases");
+  assert.equal(coverage.conditionalTop1Recall, 0.5);
+  assert.equal(coverage.conditionalTop5Recall, 1, "both labelable cases matched inside top-5");
 
   const goodMetrics = (): MismatchMetrics => ({
     cases: 40, attempted: 40, correct: 40, wrong: 0, accuracy: 1, abstained: 0, malformed: 0, failed: 0,
     highConfidenceSelections: 40, highConfidenceCorrect: 40, precisionAtThreshold: 1, coverage: 1,
-    calibration: [], baselineCorrect: 20, baselineAccuracy: 0.5, latencyMs: 0,
+    calibration: [], perTransform: [], baselineDenominator: 40, baselineCorrect: 20, baselineAccuracy: 0.5, latencyMs: 0,
   });
 
-  assert.equal(decideMismatch(recall, goodMetrics(), 10).verdict, "reject", "insufficient cases");
-  assert.equal(decideMismatch(computeRecall([]), goodMetrics(), 40).verdict, "reject", "low recall");
-  assert.equal(decideMismatch({ ...recall, top5Recall: 0.96 }, { ...goodMetrics(), wrong: 1 }, 40).verdict, "shadow-only", "wrong selection");
-  assert.equal(decideMismatch({ ...recall, top5Recall: 0.96 }, { ...goodMetrics(), highConfidenceSelections: 10, highConfidenceCorrect: 10 }, 40).verdict, "shadow-only", "too few high-confidence");
-  assert.equal(decideMismatch({ ...recall, top5Recall: 0.96 }, goodMetrics(), 40).verdict, "promote");
-  assert.deepEqual(MISMATCH_PROMOTION_GATE, { minRecall: 0.95, minHighConfidenceSelections: 30, confidenceThreshold: 0.99, maxWrong: 0 });
+  assert.equal(decideMismatch(coverage, goodMetrics(), 10).verdict, "reject", "insufficient cases");
+  assert.equal(decideMismatch({ ...coverage, coverage: 0.9 }, goodMetrics(), 40).verdict, "reject", "coverage below 0.95");
+  assert.match(decideMismatch({ ...coverage, coverage: 0.9 }, goodMetrics(), 40).reason, /candidate-set coverage/);
+  assert.equal(decideMismatch({ ...coverage, coverage: 0.96 }, { ...goodMetrics(), wrong: 1 }, 40).verdict, "shadow-only", "wrong selection");
+  assert.equal(decideMismatch({ ...coverage, coverage: 0.96 }, { ...goodMetrics(), highConfidenceSelections: 10, highConfidenceCorrect: 10 }, 40).verdict, "shadow-only", "too few high-confidence");
+  assert.equal(decideMismatch({ ...coverage, coverage: 0.96 }, goodMetrics(), 40).verdict, "promote");
+  assert.deepEqual(MISMATCH_PROMOTION_GATE, { minCoverage: 0.95, minHighConfidenceSelections: 30, confidenceThreshold: 0.99, maxWrong: 0 });
+});
+
+test("per-transformation accuracy is reported for selected candidates", () => {
+  const labelable = [{ caseId: "a", labelOrdinal: 1 }, { caseId: "b", labelOrdinal: 2 }, { caseId: "c", labelOrdinal: 3 }];
+  const results: MismatchResult[] = [
+    { caseId: "a", status: "answered", choice: "candidate-1", choiceTransform: "verbatim", confidence: 0.6, latencyMs: 1 },
+    { caseId: "b", status: "answered", choice: "candidate-1", choiceTransform: "verbatim", confidence: 0.6, latencyMs: 1 },
+    { caseId: "c", status: "answered", choice: "candidate-3", choiceTransform: "trimmed", confidence: 0.6, latencyMs: 1 },
+  ];
+  const metrics = evaluateMismatch(labelable, results);
+  assert.deepEqual(metrics.perTransform, [
+    { transform: "verbatim", attempts: 2, correct: 1, accuracy: 0.5 },
+    { transform: "trimmed", attempts: 1, correct: 1, accuracy: 1 },
+  ]);
+  assert.equal(metrics.baselineDenominator, 3, "baseline denominator is the labelable count");
 });

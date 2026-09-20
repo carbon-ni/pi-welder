@@ -22,7 +22,7 @@ import {
   MISMATCH_PROMOTION_GATE,
   buildMismatchRequest,
   candidateOptions,
-  computeRecall,
+  computeCandidateCoverage,
   decideMismatch,
   evaluateMismatch,
   parseMismatchResponse,
@@ -57,6 +57,8 @@ interface CandidateCase {
   labelOrdinal?: number;
   candidateCount: number;
   options: string[];
+  /** ordinal -> transform, for per-transformation accuracy. */
+  transforms: Record<string, string>;
   request: string;
 }
 
@@ -83,6 +85,7 @@ async function collect(sessionsDir: string): Promise<{ sessions: number; mined: 
           ...(labelOrdinal(candidates, evaluationCase.successfulOldText) === undefined ? {} : { labelOrdinal: labelOrdinal(candidates, evaluationCase.successfulOldText)! }),
           candidateCount: candidates.length,
           options: candidateOptions(candidates),
+          transforms: Object.fromEntries(candidates.map((candidate) => [`candidate-${candidate.ordinal}`, candidate.transform])),
           request: JSON.stringify(buildMismatchRequest(evaluationCase, candidates)),
         });
       }
@@ -117,6 +120,7 @@ async function runJeq(cases: readonly CandidateCase[], outDir: string, budget: n
         caseId: evaluationCase.caseId,
         status: response.choice === "none" ? "abstained" : "answered",
         choice: response.choice,
+        ...(response.choice === "none" || evaluationCase.transforms[response.choice] === undefined ? {} : { choiceTransform: evaluationCase.transforms[response.choice] }),
         ...(response.confidence === undefined ? {} : { confidence: response.confidence }),
         latencyMs: Date.now() - started,
       });
@@ -129,8 +133,8 @@ async function runJeq(cases: readonly CandidateCase[], outDir: string, budget: n
 
 async function commandRun(args: Args): Promise<void> {
   const { sessions, mined, cases } = await collect(args.sessions);
-  // Count labelable only among cases; recall denominator is all mined candidate cases.
-  const recall = computeRecall(cases);
+  // Coverage denominator is all mined candidate cases; conditional recall is over labelable cases.
+  const coverage = computeCandidateCoverage(cases);
   const labelable = cases.filter((entry) => entry.labelOrdinal !== undefined);
   const distinctSessions = new Set(labelable.map((entry) => entry.caseId.split("#")[0]));
   const privacyPass = requestPrivacyPasses(cases.map((entry) => entry.request));
@@ -142,8 +146,14 @@ async function commandRun(args: Args): Promise<void> {
     candidateCases: cases.length,
     labelable: labelable.length,
     distinctSessions: distinctSessions.size,
-    recall,
+    candidateSet: coverage,
     requestPrivacyPass: privacyPass,
+    scopeShortfall: {
+      sourceReconstruction: false,
+      contextExtensionCandidates: false,
+      fuzzyLineWindowCandidates: false,
+      note: "The plan's source-reconstruction / fuzzy-line-window / context-extension candidates are NOT implemented: no bounded pre-failure source evidence is used. Only closed transformations of the failed anchor are generated.",
+    },
     gate: MISMATCH_PROMOTION_GATE,
   };
 
@@ -151,7 +161,7 @@ async function commandRun(args: Args): Promise<void> {
   if (shouldRunJev) {
     const results = await runJeq(labelable, args.out, args.budget);
     const metrics = evaluateMismatch(labelable, results);
-    report.jev = { metrics, verdict: decideMismatch(recall, metrics, labelable.length) };
+    report.jev = { metrics, verdict: decideMismatch(coverage, metrics, labelable.length) };
     report.attrition = { mined: mined, candidateCases: cases.length, labelable: labelable.length, evaluated: results.length };
   } else {
     report.attrition = { mined: mined, candidateCases: cases.length, labelable: labelable.length, evaluated: 0 };
@@ -163,8 +173,8 @@ async function commandRun(args: Args): Promise<void> {
       ? { verdict: "reject", reason: "request-privacy-tests-failed" }
       : labelable.length < MIN_LABELABLE
         ? { verdict: "reject", reason: `insufficient-labelable-cases: ${labelable.length} < ${MIN_LABELABLE}` }
-        : recall.top5Recall < MISMATCH_PROMOTION_GATE.minRecall
-          ? { verdict: "reject", reason: `candidate top-5 recall ${recall.top5Recall.toFixed(3)} < ${MISMATCH_PROMOTION_GATE.minRecall}` }
+        : coverage.coverage < MISMATCH_PROMOTION_GATE.minCoverage
+          ? { verdict: "reject", reason: `candidate-set coverage ${coverage.coverage.toFixed(3)} < ${MISMATCH_PROMOTION_GATE.minCoverage} (conditional top-5 recall ${coverage.conditionalTop5Recall.toFixed(3)})` }
           : { verdict: "shadow-only", reason: "jeq not run in this invocation" };
   }
 

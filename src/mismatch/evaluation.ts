@@ -14,7 +14,8 @@ export const MISMATCH_THRESHOLD = 0.99;
 export const PROBABILITY_SUM_TOLERANCE = 0.02;
 
 export const MISMATCH_PROMOTION_GATE = Object.freeze({
-  minRecall: 0.95,
+  /** Overall candidate-set coverage (labelable / mined), not conditional recall. */
+  minCoverage: 0.95,
   minHighConfidenceSelections: 30,
   confidenceThreshold: 0.99,
   maxWrong: 0,
@@ -104,32 +105,44 @@ export interface MismatchResult {
   caseId: string;
   status: "answered" | "abstained" | "malformed" | "failed";
   choice?: string;
+  /** Transformation of the chosen candidate (for per-transformation accuracy). */
+  choiceTransform?: string;
   confidence?: number;
   latencyMs: number;
 }
 
-export interface CandidateRecall {
+/**
+ * Candidate-set coverage and conditional recall, reported separately:
+ * - coverage = labelable / all mined candidate cases (end-to-end hit rate);
+ * - conditional recall = matches / labelable cases.
+ */
+export interface CandidateSetCoverage {
   cases: number;
-  generated: number;
+  labelable: number;
+  coverage: number;
   top1: number;
   top5: number;
-  top1Recall: number;
-  top5Recall: number;
+  conditionalTop1Recall: number;
+  conditionalTop5Recall: number;
 }
 
-export function computeRecall(cases: readonly { labelOrdinal?: number }[]): CandidateRecall {
-  const generated = cases.filter((entry) => entry.labelOrdinal !== undefined);
+export function computeCandidateCoverage(cases: readonly { labelOrdinal?: number }[]): CandidateSetCoverage {
+  const labelable = cases.filter((entry) => entry.labelOrdinal !== undefined).length;
+  const top1 = cases.filter((entry) => entry.labelOrdinal === 1).length;
+  const top5 = cases.filter((entry) => (entry.labelOrdinal ?? 0) >= 1 && (entry.labelOrdinal ?? 0) <= 5).length;
   return {
     cases: cases.length,
-    generated: generated.length,
-    top1: generated.filter((entry) => entry.labelOrdinal === 1).length,
-    top5: generated.filter((entry) => (entry.labelOrdinal ?? 0) >= 1 && (entry.labelOrdinal ?? 0) <= 5).length,
-    top1Recall: cases.length === 0 ? 0 : generated.filter((entry) => entry.labelOrdinal === 1).length / cases.length,
-    top5Recall: cases.length === 0 ? 0 : generated.length / cases.length,
+    labelable,
+    coverage: cases.length === 0 ? 0 : labelable / cases.length,
+    top1,
+    top5,
+    conditionalTop1Recall: labelable === 0 ? 0 : top1 / labelable,
+    conditionalTop5Recall: labelable === 0 ? 0 : top5 / labelable,
   };
 }
 
 export interface CalibrationBucket { id: string; min: number; max?: number; attempts: number; correct: number; accuracy: number }
+export interface TransformAccuracy { transform: string; attempts: number; correct: number; accuracy: number }
 
 export interface MismatchMetrics {
   cases: number;
@@ -145,6 +158,9 @@ export interface MismatchMetrics {
   precisionAtThreshold: number;
   coverage: number;
   calibration: CalibrationBucket[];
+  perTransform: TransformAccuracy[];
+  /** Baseline = always ordinal 1; denominator is the labelable case count. */
+  baselineDenominator: number;
   baselineCorrect: number;
   baselineAccuracy: number;
   latencyMs: number;
@@ -164,6 +180,7 @@ export function evaluateMismatch(
 ): MismatchMetrics {
   const byCase = new Map(results.map((result) => [result.caseId, result]));
   const calibration = BUCKETS.map((bucket) => ({ ...bucket, attempts: 0, correct: 0, accuracy: 0 }));
+  const perTransform = new Map<string, { attempts: number; correct: number }>();
   let attempted = 0;
   let correct = 0;
   let wrong = 0;
@@ -192,6 +209,12 @@ export function evaluateMismatch(
     const bucket = calibration.find((candidate) => confidence >= candidate.min && (candidate.max === undefined || confidence < candidate.max));
     if (bucket) { bucket.attempts++; if (isCorrect) bucket.correct++; }
     if (confidence >= MISMATCH_THRESHOLD) { highConfidenceSelections++; if (isCorrect) highConfidenceCorrect++; }
+    if (result.choiceTransform !== undefined) {
+      const entryBucket = perTransform.get(result.choiceTransform) ?? { attempts: 0, correct: 0 };
+      entryBucket.attempts++;
+      if (isCorrect) entryBucket.correct++;
+      perTransform.set(result.choiceTransform, entryBucket);
+    }
   }
   for (const bucket of calibration) bucket.accuracy = bucket.attempts === 0 ? 0 : bucket.correct / bucket.attempts;
 
@@ -210,6 +233,10 @@ export function evaluateMismatch(
     precisionAtThreshold: highConfidenceSelections === 0 ? 0 : highConfidenceCorrect / highConfidenceSelections,
     coverage: total === 0 ? 0 : attempted / total,
     calibration,
+    perTransform: [...perTransform.entries()]
+      .map(([transform, entry]) => ({ transform, attempts: entry.attempts, correct: entry.correct, accuracy: entry.attempts === 0 ? 0 : entry.correct / entry.attempts }))
+      .sort((a, b) => b.attempts - a.attempts || a.transform.localeCompare(b.transform)),
+    baselineDenominator: total,
     baselineCorrect,
     baselineAccuracy: total === 0 ? 0 : baselineCorrect / total,
     latencyMs,
@@ -218,13 +245,17 @@ export function evaluateMismatch(
 
 export type MismatchVerdict = "promote" | "reject" | "shadow-only";
 
-/** Promotion requires recall >= 0.95 AND >= 30 high-confidence selections with zero wrong. */
-export function decideMismatch(recall: CandidateRecall, metrics: MismatchMetrics, labelableCases: number): { verdict: MismatchVerdict; reason: string } {
+/**
+ * Promotion requires candidate-set coverage >= 0.95 AND >= 30 correct
+ * high-confidence selections with zero wrong. Conditional recall alone never
+ * promotes: the generator must contain the answer for almost every case.
+ */
+export function decideMismatch(coverage: CandidateSetCoverage, metrics: MismatchMetrics, labelableCases: number): { verdict: MismatchVerdict; reason: string } {
   if (labelableCases < 30) {
     return { verdict: "reject", reason: `insufficient-labelable-cases: ${labelableCases} < 30` };
   }
-  if (recall.top5Recall < MISMATCH_PROMOTION_GATE.minRecall) {
-    return { verdict: "reject", reason: `candidate top-5 recall ${recall.top5Recall.toFixed(3)} < ${MISMATCH_PROMOTION_GATE.minRecall}` };
+  if (coverage.coverage < MISMATCH_PROMOTION_GATE.minCoverage) {
+    return { verdict: "reject", reason: `candidate-set coverage ${coverage.coverage.toFixed(3)} < ${MISMATCH_PROMOTION_GATE.minCoverage} (conditional top-5 recall ${coverage.conditionalTop5Recall.toFixed(3)})` };
   }
   if (metrics.wrong > MISMATCH_PROMOTION_GATE.maxWrong) {
     return { verdict: "shadow-only", reason: `wrong selections: ${metrics.wrong} > ${MISMATCH_PROMOTION_GATE.maxWrong}` };
@@ -232,5 +263,5 @@ export function decideMismatch(recall: CandidateRecall, metrics: MismatchMetrics
   if (metrics.highConfidenceSelections < MISMATCH_PROMOTION_GATE.minHighConfidenceSelections) {
     return { verdict: "shadow-only", reason: `high-confidence selections: ${metrics.highConfidenceSelections} < ${MISMATCH_PROMOTION_GATE.minHighConfidenceSelections}` };
   }
-  return { verdict: "promote", reason: `recall ${recall.top5Recall.toFixed(3)} with ${metrics.highConfidenceSelections} high-confidence selections and zero wrong` };
+  return { verdict: "promote", reason: `coverage ${coverage.coverage.toFixed(3)} with ${metrics.highConfidenceSelections} high-confidence selections and zero wrong` };
 }

@@ -22,6 +22,8 @@ export interface EditEvent {
 }
 
 export const FOLLOWING_CALL_WINDOW = 3;
+/** Pre-failure intent signals come from at most this many prior events. */
+export const PRIOR_EVENT_WINDOW = 3;
 
 export interface ClosedPriorSignals {
   priorEditAttempts: number;
@@ -61,41 +63,44 @@ export function extractMismatchCases(sessionId: string, events: readonly EditEve
   }
 
   const cases: MismatchCase[] = [];
-  let priorEditAttempts = 0;
-  let priorErrorCalls = 0;
-  let priorOkCalls = 0;
 
   for (let index = 0; index < events.length; index++) {
     const call = events[index]!;
     if (call.kind !== "toolCall" || typeof call.toolName !== "string") continue;
 
     const result = typeof call.toolCallId === "string" ? resultByCall.get(call.toolCallId) : undefined;
-    // Pre-failure snapshot: counters describe events strictly before this call.
-    const prior: ClosedPriorSignals = { priorEditAttempts, priorErrorCalls, priorOkCalls };
-    if (result?.isError === true) {
-      priorErrorCalls++;
-      if (isNotFoundEdit({ ...call, isError: true, errorText: result.errorText })) {
-        const attemptedOldText = call.oldText;
-        if (typeof attemptedOldText === "string" && attemptedOldText.length > 0) {
-          const success = findRecovery(events, index, call);
-          if (success) {
-            cases.push({
-              caseId: `${sessionId}#${call.toolCallId ?? call.id}`,
-              sessionId,
-              attemptedOldText,
-              successfulOldText: success.oldText!,
-              failureClass: "edit.oldtext-not-found",
-              prior,
-            });
-          }
+    if (result?.isError === true && isNotFoundEdit({ ...call, isError: true, errorText: result.errorText })) {
+      const attemptedOldText = call.oldText;
+      if (typeof attemptedOldText === "string" && attemptedOldText.length > 0) {
+        const success = findRecovery(events, index, call);
+        if (success) {
+          cases.push({
+            caseId: `${sessionId}#${call.toolCallId ?? call.id}`,
+            sessionId,
+            attemptedOldText,
+            successfulOldText: success.oldText!,
+            failureClass: "edit.oldtext-not-found",
+            prior: boundedPriorSignals(events, index),
+          });
         }
       }
-      if (call.toolName === "edit") priorEditAttempts++;
-    } else if (result !== undefined && result.isError === false) {
-      priorOkCalls++;
     }
   }
   return cases;
+}
+
+/**
+ * Pre-failure signals from at most three events physically before the failed
+ * call. Nothing at or after the failed call can enter these counters, so a
+ * result that lands later under parallel ordering never leaks forward.
+ */
+export function boundedPriorSignals(events: readonly EditEvent[], callIndex: number): ClosedPriorSignals {
+  const window = events.slice(Math.max(0, callIndex - PRIOR_EVENT_WINDOW), callIndex);
+  return {
+    priorEditAttempts: window.filter((event) => event.kind === "toolCall" && event.toolName === "edit").length,
+    priorErrorCalls: window.filter((event) => event.kind === "toolResult" && event.isError === true).length,
+    priorOkCalls: window.filter((event) => event.kind === "toolResult" && event.isError === false).length,
+  };
 }
 
 /** Finds the successful same-path edit within the bounded call window. */
