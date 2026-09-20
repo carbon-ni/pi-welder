@@ -355,9 +355,9 @@ export function labelLineIsPrivacySafe(line: string): boolean {
   if (typeof record.ts !== "string" || Number.isNaN(Date.parse(record.ts))) return false;
   if (!OUTCOMES.has(record.outcome as string)) return false;
   const identifier = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
-  for (const key of ["sessionId", "episodeId", "sourceTool"]) {
-    if (typeof record[key] !== "string" || (record[key] as string).length > 200) return false;
-  }
+  if (typeof record.sessionId !== "string" || !OPAQUE_ID.test(record.sessionId)) return false;
+  if (typeof record.episodeId !== "string" || !EPISODE_ID.test(record.episodeId)) return false;
+  if (typeof record.sourceTool !== "string" || (record.sourceTool as string).length > 60) return false;
   if (typeof record.sourceTool !== "string" || !identifier.test(record.sourceTool)) return false;
   if (record.targetTool !== undefined && (typeof record.targetTool !== "string" || !identifier.test(record.targetTool))) return false;
   if (record.planOrdinal !== undefined && (!Number.isInteger(record.planOrdinal) || (record.planOrdinal as number) < 1 || (record.planOrdinal as number) > MAX_PLANS)) return false;
@@ -374,8 +374,16 @@ const FIELD_KEYS = new Set(["from", "role", "features"]);
 const FEATURE_KEYS = new Set(["kind", "shape", "lengthBucket", "tokenBucket", "itemBucket"]);
 const PRIOR_KEYS = new Set(["priorToolNames", "priorFailedCalls"]);
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
-/** `role<-from`: two closed identifiers joined by the exact arrow token. */
-const PAIR_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,60}<-([A-Za-z_][A-Za-z0-9_-]{0,60})?$/;
+/** `role<-from`: BOTH identifiers are required; an empty side fails. */
+const PAIR_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,60}<-([A-Za-z_][A-Za-z0-9_-]{0,60})$/;
+/**
+ * Generated opaque IDs only: Pi session IDs are UUIDs and episode IDs are
+ * `sessionId#toolCallId`, where call IDs use `|`, `:`, `.`, `_`, `-` and
+ * alphanumerics. Arbitrary text (for example a secret with spaces) fails.
+ */
+const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:#|+-]{0,199}$/;
+/** Episode IDs are always `<sessionId>#<toolCallId>`; free text has no `#`. */
+const EPISODE_ID = /^[A-Za-z0-9][A-Za-z0-9._:|+-]{0,99}#[A-Za-z0-9][A-Za-z0-9._:|+-]{0,99}$/;
 /** Closed vocabularies: any value outside them fails the write. */
 const OUTCOMES = new Set(["labelled", "expired", "interrupted"]);
 const FEATURE_KINDS = new Set(["string", "number", "boolean", "array"]);

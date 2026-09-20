@@ -234,6 +234,11 @@ test("privacy: a forged secret in each closed enum and in ids/pairs/outcome is r
     ["token bucket", (parsed) => { parsed.request.plans[0].fields[0].features.tokenBucket = "SECRET"; }],
     ["item bucket", (parsed) => { parsed.request.plans[0].fields[0].features.itemBucket = "SECRET"; }],
     ["nested secret", (parsed) => { parsed.request.leak = "SECRET"; }],
+    ["secret sessionId", (parsed) => { parsed.sessionId = "SECRET SESSION"; }],
+    ["secret episodeId", (parsed) => { parsed.episodeId = "SECRET_EPISODE"; }],
+    ["empty pair source", (parsed) => { parsed.pairs = ["command<-"]; }],
+    ["empty pair role", (parsed) => { parsed.pairs = ["<-execute"]; }],
+    ["empty pair", (parsed) => { parsed.pairs = ["<-"]; }],
   ];
   for (const [label, mutate] of mutators) {
     const parsed = JSON.parse(base);
