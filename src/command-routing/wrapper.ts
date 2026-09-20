@@ -11,6 +11,8 @@
  * and the command is never logged, rendered, or copied into any result.
  */
 
+import { Value } from "typebox/value";
+
 import { recognizeBashShapedCall } from "./gate.ts";
 import { BASH_JUDGMENT_MAX_MS, parseBashJudgment, type BashJudgmentClient } from "../bash-judgment/contract.ts";
 import { judgeEligibility } from "../bash-judgment/eligibility.ts";
@@ -96,39 +98,24 @@ function rememberToken(state: BashRouteState, token: string, command: StoredRout
 }
 
 /**
- * Returns true when the args satisfy the built-in's own TypeBox schema, using
- * the JSON Schema shape Pi's `Type.Object` emits.
+ * Returns true when the args satisfy the built-in's **actual** TypeBox schema.
  *
- * Only an object schema with a recognizable `properties` map counts: anything
- * else is unknown and never bypasses classification. Extras are left to Pi to
- * judge, so a plausible call always takes the native path — the safe direction.
+ * `typebox/value` is used at the version Pi itself depends on, so the check is
+ * the same engine Pi uses to validate tool arguments. Any unsupported or
+ * malformed schema throws and fails closed to `false`, which keeps the call on
+ * the classification path instead of silently accepting it.
  */
 export function preparedArgumentsMatchSchema(parameters: unknown, args: unknown): boolean {
-  if (!parameters || typeof parameters !== "object") return false;
-  const schema = parameters as { type?: unknown; required?: unknown; properties?: unknown };
-  if (schema.type !== "object") return false;
-  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
-
-  const properties = (schema.properties && typeof schema.properties === "object" ? schema.properties : {}) as Record<string, unknown>;
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  for (const key of required) {
-    if (typeof key !== "string" || !(key in (args as Record<string, unknown>))) return false;
+  if (parameters === null || typeof parameters !== "object") return false;
+  // An object schema is the only evidence that this is a normal built-in call.
+  // Anything else — no schema, an empty stub, a malformed one — stays on the
+  // classification path rather than being silently accepted.
+  if ((parameters as { type?: unknown }).type !== "object") return false;
+  try {
+    return Value.Check(parameters as never, args);
+  } catch {
+    return false;
   }
-  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-    const property = properties[key];
-    if (!property || typeof property !== "object") continue;
-    if (!valueMatchesType((property as { type?: unknown }).type, value)) return false;
-  }
-  return true;
-}
-
-function valueMatchesType(type: unknown, value: unknown): boolean {
-  if (type === "string") return typeof value === "string";
-  if (type === "number") return typeof value === "number" && Number.isFinite(value);
-  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
-  if (type === "boolean") return typeof value === "boolean";
-  if (type === "array") return Array.isArray(value);
-  return true;
 }
 
 /** Schema-valid stand-in for the routed call. Contains no command text. */

@@ -24,38 +24,44 @@ interface Captured {
  * these tests run against a throwaway HOME with routing explicitly enabled.
  * They must never depend on local settings.
  */
-let factoryPromise: Promise<(pi: ExtensionHost) => void> | undefined;
+interface WelderSettings { repairsEnabled?: boolean; commandReroutingEnabled?: boolean }
 
-async function loadFactory(): Promise<(pi: ExtensionHost) => void> {
-  if (factoryPromise === undefined) {
-    factoryPromise = (async () => {
-      const home = await fs.mkdtemp(path.join(os.tmpdir(), "welder-home-"));
-      const agentDir = path.join(home, ".pi", "agent");
-      await fs.mkdir(agentDir, { recursive: true });
-      await fs.writeFile(path.join(agentDir, "welder.json"), JSON.stringify({ repairsEnabled: true, commandReroutingEnabled: true }));
+let tempHome: string | undefined;
+let importCount = 0;
 
-      const previousHome = process.env.HOME;
-      process.env.HOME = home;
-      try {
-        const module = await import("../index.ts");
-        return module.default as (pi: ExtensionHost) => void;
-      } finally {
-        process.env.HOME = previousHome;
-      }
-    })();
-  }
-  return factoryPromise;
+/** Writes the settings this test file controls, never the developer's real ones. */
+async function writeSettings(home: string, settings: WelderSettings): Promise<void> {
+  const agentDir = path.join(home, ".pi", "agent");
+  await fs.mkdir(agentDir, { recursive: true });
+  await fs.writeFile(path.join(agentDir, "welder.json"), JSON.stringify(settings));
 }
 
-async function loadExtension(): Promise<Captured> {
-  const factory = await loadFactory();
+/**
+ * Loads and invokes the composition root while HOME points at a throwaway
+ * directory. The config path is captured at import and the config is read when
+ * the factory runs, so HOME stays active for both and the developer's real
+ * `~/.pi/agent/welder.json` can never influence the outcome.
+ */
+async function loadExtension(settings: WelderSettings = { repairsEnabled: true, commandReroutingEnabled: true }, options: { fresh?: boolean } = {}): Promise<Captured> {
+  tempHome ??= await fs.mkdtemp(path.join(os.tmpdir(), "welder-home-"));
+  await writeSettings(tempHome, settings);
+
   const captured: Captured = { handlers: {}, commands: {}, tools: [] };
   const api = {
     on(event: string, handler: any) { captured.handlers[event] = handler; },
     registerCommand(name: string, def: any) { captured.commands[name] = def; },
     registerTool(tool: any) { captured.tools.push(tool); },
   };
-  factory(api as any);
+
+  const previousHome = process.env.HOME;
+  process.env.HOME = tempHome;
+  try {
+    const url = options.fresh === true ? `../index.ts?instance=${++importCount}` : "../index.ts";
+    const module = await import(url);
+    (module.default as (pi: ExtensionHost) => void)(api as any);
+  } finally {
+    process.env.HOME = previousHome;
+  }
   return captured;
 }
 
@@ -150,4 +156,26 @@ test("a deterministic exact route keeps one repair and never classifies", async 
     assert.equal("classified" in routed[0], false, "no classification flag on a deterministic route");
     assert.match(stats, /route-to-bash\s+1\s+100%/, "still one count");
   });
+});
+
+test("the composition root reads settings from HOME, so a developer's real config cannot leak in", async () => {
+  // A fresh instance under HOME settings that DISABLE routing. If the developer's
+  // real ~/.pi/agent/welder.json were read instead, this call would be routed and
+  // the assertion below would fail.
+  const disabled = await loadExtension({ repairsEnabled: true, commandReroutingEnabled: false }, { fresh: true });
+  const disabledWrite = disabled.tools.find((tool) => tool.name === "write");
+  assert.ok(disabledWrite, "the write tool is registered");
+  // Trust is set, so the setting alone decides.
+  await disabled.handlers["session_start"]?.(undefined, context(process.cwd()));
+
+  const routed = disabledWrite.prepareArguments!({ CMD: "printf jev-isolation" });
+  assert.deepEqual(routed, { CMD: "printf jev-isolation" }, "routing stays off when THIS HOME says so");
+
+  // The same call IS routed when THIS HOME enables it: the file drives behavior.
+  const enabled = await loadExtension({ repairsEnabled: true, commandReroutingEnabled: true }, { fresh: true });
+  const enabledWrite = enabled.tools.find((tool) => tool.name === "write");
+  assert.ok(enabledWrite);
+  await enabled.handlers["session_start"]?.(undefined, context(process.cwd()));
+  const sentinel = enabledWrite.prepareArguments!({ CMD: "printf jev-isolation" }) as { path?: string };
+  assert.equal(typeof sentinel.path, "string", "the HOME settings enable routing");
 });
