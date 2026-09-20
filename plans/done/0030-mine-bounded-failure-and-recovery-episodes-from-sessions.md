@@ -1,7 +1,7 @@
 ---
 id: TASK-0030
 title: Mine bounded failure-and-recovery episodes from sessions
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [mining, sessions, intent, recovery, evidence]
