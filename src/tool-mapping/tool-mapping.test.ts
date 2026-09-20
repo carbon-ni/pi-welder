@@ -9,6 +9,7 @@ import {
   featuresOfValue,
   extractPlanEpisodes,
   parseToolMappingAnswer,
+  planMatchesCall,
   planMappings,
   planOptions,
   validatesMapping,
@@ -75,7 +76,11 @@ test("mappings are bijective: no value is duplicated, transformed, or dropped", 
 
 test("abstains on unsupported values, too many fields, and oversized payloads", () => {
   assert.equal(planMappings("write", { command: "ls", nested: { a: 1 } }).reason, "unsupported-value");
-  assert.equal(planMappings("write", { command: "ls", list: [1, "x", { deep: true }] }).status, "plans", "shallow arrays are supported");
+  // Arrays only survive when the target field's own item constraint accepts them.
+  const validItems = planMappings("write", { command: "ls", list: [{ oldText: "a", newText: "b" }] });
+  assert.equal(validItems.status, "plans");
+  assert.equal(validItems.plans.some((plan) => plan.targetTool === "edit"), true, "edit.edits accepts valid items");
+  assert.equal(planMappings("write", { command: "ls", list: [1, "x", { deep: true }] }).status, "abstain", "invalid edit items are not a plan");
   assert.equal(planMappings("write", { a: "1", b: "2", c: "3", d: "4", e: "5", f: "6" }).reason, "too-many-fields");
   assert.equal(planMappings("write", { command: "x".repeat(4_000) }).reason, "oversized-value");
   assert.equal(planMappings("write", ["ls"]).reason, "not-an-object");
@@ -266,4 +271,102 @@ test("the promotion gate requires evidence, coverage, zero wrong, and beating ba
   assert.equal(decideMappings(0.96, metrics({ baselineIdentityAccuracy: 1 }), 40).verdict, "shadow-only", "does not beat the identity baseline");
   assert.equal(decideMappings(0.96, metrics(), 40).verdict, "promote");
   assert.deepEqual(MAPPING_PROMOTION_GATE, { minCoverage: 0.95, minSelections: 30, threshold: 0.9, maxWrong: 0 });
+});
+
+test("validatesMapping independently enforces distinct sources and distinct targets", () => {
+  const write = TOOL_CONTRACTS.get("write")!;
+  const input = { a: "one", b: "two" };
+
+  const good = { path: "one", content: "two" };
+  assert.equal(validatesMapping(write, good, [{ from: "a", to: "path" }, { from: "b", to: "content" }], input), true);
+
+  // Duplicate source: one input field used twice.
+  assert.equal(validatesMapping(write, good, [{ from: "a", to: "path" }, { from: "a", to: "content" }], input), false);
+  // Duplicate target: two input fields collapsed onto one field.
+  assert.equal(validatesMapping(write, { path: "one" }, [{ from: "a", to: "path" }, { from: "b", to: "path" }], input), false);
+  // Dropped input field.
+  assert.equal(validatesMapping(write, { path: "one" }, [{ from: "a", to: "path" }], input), false);
+  // Value changed.
+  assert.equal(validatesMapping(write, { path: "one", content: "CHANGED" }, [{ from: "a", to: "path" }, { from: "b", to: "content" }], input), false);
+  // Unknown target key.
+  assert.equal(validatesMapping(write, { path: "one", content: "two", extra: 1 }, [{ from: "a", to: "path" }, { from: "b", to: "content" }], input), false);
+});
+
+test("revalidation enforces the edit.edits item shape", () => {
+  const edit = TOOL_CONTRACTS.get("edit")!;
+  const goodItems = [{ oldText: "a", newText: "b" }];
+  const pairs = [{ from: "file", to: "path" }, { from: "replacements", to: "edits" }];
+  const input = { file: "p", replacements: goodItems };
+  assert.equal(validatesMapping(edit, { path: "p", edits: goodItems }, pairs, input), true);
+
+  const badShapes: unknown[] = [
+    [{ oldText: "a" }],                       // missing newText
+    [{ newText: "b" }],                       // missing oldText
+    [{ oldText: 1, newText: "b" }],           // wrong item type
+    [{ oldText: "a", newText: "b", extra: 1 }], // unknown item key
+    ["plain"],                                 // not an object item
+    [null],
+  ];
+  for (const replacements of badShapes) {
+    assert.equal(
+      validatesMapping(edit, { path: "p", edits: replacements }, pairs, { file: "p", replacements }),
+      false,
+      JSON.stringify(replacements),
+    );
+  }
+});
+
+test("revalidation enforces the bash timeout range", () => {
+  const bash = TOOL_CONTRACTS.get("bash")!;
+  const pairs = [{ from: "run", to: "command" }, { from: "wait", to: "timeout" }];
+  const input = { run: "ls", wait: 10 };
+  assert.equal(validatesMapping(bash, { command: "ls", timeout: 10 }, pairs, input), true);
+  assert.equal(validatesMapping(bash, { command: "ls", timeout: 2_147_483.647 }, pairs, { run: "ls", wait: 2_147_483.647 }), true);
+  for (const wait of [0, -1, 2_147_483.648, Number.POSITIVE_INFINITY, Number.NaN]) {
+    assert.equal(
+      validatesMapping(bash, { command: "ls", timeout: wait }, pairs, { run: "ls", wait }),
+      false,
+      `timeout ${wait}`,
+    );
+  }
+  // An out-of-range timeout never yields a plan.
+  const enumeration = planMappings("write", { run: "ls", wait: 0 });
+  assert.equal(enumeration.status, "plans");
+  assert.equal(enumeration.plans.some((plan) => plan.targetTool === "bash"), false, "bash plan rejected by the range constraint");
+});
+
+test("a later call may add target-valid optional fields but never unknown ones", () => {
+  const events: MappingEvent[] = [
+    ...call("f1", "write", { execute: "git status" }, 0),
+    ...result("f1", true, validationError("write"), 0),
+    ...call("s1", "bash", { command: "git status", timeout: 45 }, 1), // optional timeout added
+    ...result("s1", false, "", 1),
+  ];
+  const accepted = extractPlanEpisodes("s", events);
+  assert.equal(accepted.attrition.labelled, 1, "a target-valid optional extra is accepted");
+  assert.equal(accepted.episodes[0]!.targetTool, "bash");
+
+  const unknownExtra: MappingEvent[] = [
+    ...call("f1", "write", { execute: "git status" }, 0),
+    ...result("f1", true, validationError("write"), 0),
+    ...call("s1", "bash", { command: "git status", mystery: 1 }, 1),
+    ...result("s1", false, "", 1),
+  ];
+  assert.equal(extractPlanEpisodes("s", unknownExtra).attrition.labelled, 0, "an unknown extra field is rejected");
+
+  const badExtraType: MappingEvent[] = [
+    ...call("f1", "write", { execute: "git status" }, 0),
+    ...result("f1", true, validationError("write"), 0),
+    ...call("s1", "bash", { command: "git status", timeout: 0 }, 1),
+    ...result("s1", false, "", 1),
+  ];
+  assert.equal(extractPlanEpisodes("s", badExtraType).attrition.labelled, 0, "an out-of-range optional extra is rejected");
+
+  const missingRequired: MappingEvent[] = [
+    ...call("f1", "write", { execute: "git status" }, 0),
+    ...result("f1", true, validationError("write"), 0),
+    ...call("s1", "bash", { timeout: 20 }, 1), // command missing
+    ...result("s1", false, "", 1),
+  ];
+  assert.equal(extractPlanEpisodes("s", missingRequired).attrition.labelled, 0, "required target fields must be present");
 });

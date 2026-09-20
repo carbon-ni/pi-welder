@@ -24,6 +24,48 @@ export const SUPPORTED_TYPES = ["string", "number", "boolean", "array"] as const
 export type SupportedType = (typeof SUPPORTED_TYPES)[number];
 export type ValueKind = SupportedType | "object" | "null" | "undefined";
 
+/**
+ * Verified per-field constraints beyond the top-level type. Only constraints the
+ * shipped tools actually enforce are listed:
+ * - `bash.timeout` rejects non-finite, <= 0, and > 2^31-1 ms (pi's bash tool).
+ * - `edit.edits` items must be `{ oldText: string, newText: string }` (pi's edit tool).
+ * Adding a constraint for another tool is a registry entry, no alias list.
+ */
+export type FieldConstraint =
+  | { kind: "number"; exclusiveMin?: number; max?: number }
+  | { kind: "arrayItems"; items: Readonly<Record<string, "string" | "number" | "boolean">>; requireAll: boolean };
+
+export const FIELD_CONSTRAINTS: Readonly<Record<string, FieldConstraint>> = Object.freeze({
+  "bash.timeout": { kind: "number", exclusiveMin: 0, max: 2_147_483.647 },
+  "edit.edits": { kind: "arrayItems", items: { oldText: "string", newText: "string" }, requireAll: true },
+});
+
+export function constraintFor(tool: string, field: string): FieldConstraint | undefined {
+  return FIELD_CONSTRAINTS[`${tool}.${field}`];
+}
+
+/** Field-level constraint check used by revalidation. */
+export function satisfiesConstraint(tool: string, field: string, value: unknown): boolean {
+  const constraint = constraintFor(tool, field);
+  if (constraint === undefined) return true;
+  if (constraint.kind === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) return false;
+    if (constraint.exclusiveMin !== undefined && value <= constraint.exclusiveMin) return false;
+    if (constraint.max !== undefined && value > constraint.max) return false;
+    return true;
+  }
+  if (!Array.isArray(value)) return false;
+  return value.every((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const keys = Object.keys(item);
+    if (constraint.requireAll && !Object.keys(constraint.items).every((key) => keys.includes(key))) return false;
+    return keys.every((key) => {
+      const expected = constraint.items[key];
+      return expected !== undefined && valueKindOf((item as Record<string, unknown>)[key]) === expected;
+    });
+  });
+}
+
 export interface MappingPair {
   from: string;
   to: string;
@@ -101,14 +143,21 @@ export function validatesMapping(contract: ToolContract, args: Record<string, un
     const expected = contract.types[key];
     if (expected === undefined) return false;
     if (valueKindOf(args[key]) !== expected) return false;
+    if (!satisfiesConstraint(contract.tool, key, args[key])) return false;
   }
   for (const required of contract.required) {
     if (!(required in args)) return false;
   }
-  // Bijective over supplied fields: same count, distinct sources, same values.
+
+  // Independent bijection enforcement: distinct sources AND distinct targets,
+  // one pair per input field, one pair per produced argument key, same values.
   const sources = pairs.map((pair) => pair.from);
+  const targets = pairs.map((pair) => pair.to);
   if (new Set(sources).size !== sources.length) return false;
+  if (new Set(targets).size !== targets.length) return false;
   if (sources.length !== Object.keys(input).length) return false;
+  if (targets.length !== keys.length) return false;
+  if (!targets.every((target) => target in args)) return false;
   return pairs.every((pair) => Object.is(input[pair.from], args[pair.to]));
 }
 

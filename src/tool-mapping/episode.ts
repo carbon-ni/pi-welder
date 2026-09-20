@@ -7,7 +7,8 @@
  * Values stay in memory; only keys, roles, features, and ordinals leave.
  */
 
-import { planMappings, type MappingPlan, type PlanEnumeration, type PlannerOptions } from "./planner.ts";
+import { planMappings, satisfiesConstraint, valueKindOf, type MappingPlan, type PlanEnumeration, type PlannerOptions } from "./planner.ts";
+import { TOOL_CONTRACTS } from "../tool-routing/contracts.ts";
 
 export const FOLLOWING_CALL_WINDOW = 3;
 
@@ -57,12 +58,36 @@ function resultsByCall(events: readonly MappingEvent[]): Map<string, MappingEven
   return map;
 }
 
-/** A later call matches a plan when the tool and every mapped value agree. */
-function planMatchesCall(plan: MappingPlan, event: MappingEvent): boolean {
+/**
+ * A later call matches a plan when the tool agrees, every mapped value is
+ * unchanged, and any extra field is valid for the target schema.
+ *
+ * Optional extras are accepted on purpose: a correction legitimately adds
+ * optional fields the malformed call did not carry (a `bash` call may gain a
+ * `timeout`). An extra field that the target schema does not define, or whose
+ * type/constraint fails, is rejected, so the label can never come from a call
+ * that is not a valid instance of the planned tool.
+ */
+export function planMatchesCall(plan: MappingPlan, event: MappingEvent): boolean {
   if (event.toolName !== plan.targetTool) return false;
   const args = event.args;
-  if (!args || typeof args !== "object") return false;
-  return plan.pairs.every((pair) => Object.is(args[pair.to], plan.args[pair.to]));
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+  const contract = TOOL_CONTRACTS.get(plan.targetTool);
+  if (contract === undefined) return false;
+
+  for (const pair of plan.pairs) {
+    if (!Object.is(args[pair.to], plan.args[pair.to])) return false;
+  }
+  const mapped = new Set(plan.pairs.map((pair) => pair.to));
+  for (const key of Object.keys(args)) {
+    if (mapped.has(key)) continue;
+    const expected = contract.types[key];
+    if (expected === undefined) return false;
+    if (valueKindOf(args[key]) !== expected) return false;
+    if (!satisfiesConstraint(plan.targetTool, key, args[key])) return false;
+  }
+  // Required target fields must be satisfied by the call itself.
+  return contract.required.every((field) => field in args);
 }
 
 function findMatchingPlan(events: readonly MappingEvent[], failureIndex: number, plans: readonly MappingPlan[]): MappingPlan | undefined {
