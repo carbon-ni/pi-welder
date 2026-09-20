@@ -1,7 +1,7 @@
 ---
 id: TASK-0031
 title: Evaluate bounded edit-mismatch repair candidates with jeq
-status: doing
+status: done
 depends_on: [TASK-0030]
 priority: high
 tags: [edit, mismatch, candidates, jeq, evidence, safety]
