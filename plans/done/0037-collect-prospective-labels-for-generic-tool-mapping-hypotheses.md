@@ -1,7 +1,7 @@
 ---
 id: TASK-0037
 title: Collect prospective labels for generic tool mapping hypotheses
-status: doing
+status: done
 depends_on: [TASK-0036]
 priority: high
 tags: [routing, labels, runtime, privacy, observability]
