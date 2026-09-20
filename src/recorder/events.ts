@@ -10,6 +10,8 @@ export interface WelderEvent {
   repairs: string[];
   wasRepaired: boolean;
   inputKeys: string[];
+  /** Routing audit: the tool a blocked call was routed to. Never a payload. */
+  targetTool?: string;
   wasError?: boolean;
   errorKind?: string;
   errorText?: string;
@@ -36,6 +38,7 @@ interface BuildEventInput {
   model: string;
   repairs: Repair[];
   inputKeys: string[];
+  targetTool?: string;
 }
 
 interface BuildToolResultEventInput {
@@ -57,6 +60,7 @@ export function buildEvent(input: BuildEventInput): WelderEvent {
     repairs: input.repairs.map((r) => r.action),
     wasRepaired: input.repairs.length > 0,
     inputKeys: input.inputKeys,
+    ...(input.targetTool === undefined ? {} : { targetTool: input.targetTool }),
   };
 }
 

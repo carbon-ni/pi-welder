@@ -55,6 +55,13 @@ export function welderSettingItems(config: WelderConfig): WelderSettingItem[] {
       values: [...ON_OFF],
     },
     {
+      id: "commandReroutingEnabled",
+      label: "Bash-shaped command rerouting",
+      description: "Run an exact bash-shaped read/write/edit call once through bash in trusted projects (the command executes unchanged)",
+      currentValue: config.commandReroutingEnabled ? "on" : "off",
+      values: [...ON_OFF],
+    },
+    {
       id: "recoveryGuidanceLimit",
       label: "Failure history limit",
       description: "Max recent tool failures retained for explicit diagnostics",
@@ -86,6 +93,9 @@ export function applyWelderSetting(config: WelderConfig, id: string, value: stri
   }
   if (id === "readPathRepairEnabled") {
     return { ...config, readPathRepairEnabled: value === "on" };
+  }
+  if (id === "commandReroutingEnabled") {
+    return { ...config, commandReroutingEnabled: value === "on" };
   }
   if (id === "recoveryGuidanceLimit") {
     const limit = Number(value);

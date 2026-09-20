@@ -17,6 +17,7 @@ export const REPAIR_NAMES: readonly string[] = Object.freeze([
   "resolve-ambiguous-edit",
   "restore-read-shape",
   "restore-read-path",
+  "route-to-bash",
 ]);
 
 export function isKnownRepairName(name: string): boolean {

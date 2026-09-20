@@ -1,3 +1,4 @@
+import type { BashRouteResult } from "../command-routing/types.ts";
 import type { Repair } from "../repairs/index.ts";
 import type { DirectoryReadResult } from "./directory-read.ts";
 import type { EditNoopResult } from "./edit-noop.ts";
@@ -11,7 +12,7 @@ export interface ToolResultShape {
   content?: unknown;
 }
 
-export type ResultRepairPatch = DirectoryReadResult | EditNoopResult | MissingReadContextResult | ReadOffsetContextResult;
+export type ResultRepairPatch = DirectoryReadResult | EditNoopResult | MissingReadContextResult | ReadOffsetContextResult | BashRouteResult;
 
 export interface ResultRepair {
   patch: ResultRepairPatch;

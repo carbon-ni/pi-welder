@@ -5,12 +5,12 @@ import { applyWelderSetting, welderSettingItems } from "./welder-settings.ts";
 import { REPAIR_NAMES } from "./repair-names.ts";
 import type { WelderConfig } from "./config.ts";
 
-const off: WelderConfig = { modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false };
-const on: WelderConfig = { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false };
+const off: WelderConfig = { modelRepairReportingEnabled: false, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false };
+const on: WelderConfig = { modelRepairReportingEnabled: true, recoveryGuidanceLimit: 3, repairsEnabled: true, disabledRepairs: [], sourceShadowingEnabled: false, readPathRepairEnabled: false, commandReroutingEnabled: false };
 
 test("welderSettingItems reflects current config values as on/off", () => {
   const items = welderSettingItems(off);
-  assert.equal(items.length, 5 + REPAIR_NAMES.length);
+  assert.equal(items.length, 6 + REPAIR_NAMES.length);
   const reporting = items.find((it) => it.id === "modelRepairReportingEnabled")!;
   assert.equal(reporting.currentValue, "off");
   assert.deepEqual(reporting.values, ["on", "off"]);
@@ -35,6 +35,14 @@ test("welderSettingItems exposes the recovery guidance limit as 1-10", () => {
     .find((it) => it.id === "recoveryGuidanceLimit")!;
   assert.equal(limit.currentValue, "4");
   assert.deepEqual(limit.values, ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+});
+
+test("welderSettingItems exposes the command rerouting toggle, defaulting off", () => {
+  const item = welderSettingItems(off).find((it) => it.id === "commandReroutingEnabled")!;
+  assert.equal(item.currentValue, "off");
+  assert.match(item.description ?? "", /executes unchanged/);
+  assert.equal(applyWelderSetting(off, "commandReroutingEnabled", "on").commandReroutingEnabled, true);
+  assert.equal(applyWelderSetting(on, "commandReroutingEnabled", "off").commandReroutingEnabled, false);
 });
 
 test("welderSettingItems exposes the repairs toggle", () => {

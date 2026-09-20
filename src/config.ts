@@ -14,6 +14,13 @@ export interface WelderConfig {
    * additionally requires the predeclared evidence gate to pass.
    */
   readPathRepairEnabled: boolean;
+  /**
+   * TASK-0034 opt-in: execute an exact bash-shaped call addressed to
+   * `read`/`write`/`edit` once through Pi's built-in bash tool. Default OFF.
+   * Requires repair routing enabled, an explicit trusted project, and an
+   * injected bash capability; every other condition fails closed.
+   */
+  commandReroutingEnabled: boolean;
 }
 
 export const WELDER_CONFIG_PATH = join(homedir(), ".pi", "agent", "welder.json");
@@ -41,6 +48,7 @@ export function parseWelderConfig(value: unknown): WelderConfig {
     disabledRepairs: parseDisabledRepairs(input.disabledRepairs),
     sourceShadowingEnabled: input.sourceShadowingEnabled === true,
     readPathRepairEnabled: input.readPathRepairEnabled === true,
+    commandReroutingEnabled: input.commandReroutingEnabled === true,
   };
 }
 

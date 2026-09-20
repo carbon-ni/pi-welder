@@ -10,7 +10,10 @@
  * Commands: /welder-stats · /welder-reset · /welder-log · /welder-failures · /welder-clear · /welder-settings
  */
 
+import { createBashTool } from "@earendil-works/pi-coding-agent";
+
 import type { ExtensionHost } from "./infra/pi/contracts.ts";
+import type { BashExecutionOutcome, BashExecutor, BashExecutionRequest } from "./command-routing/types.ts";
 import { registerWelderCommands } from "./commands.ts";
 import { loadWelderConfig } from "./config.ts";
 import {
@@ -25,6 +28,33 @@ import { createRuntime } from "./runtime.ts";
 import { createTypeSafeJevClient } from "./infra/typesafe.ts";
 import { READ_PATH_PROMPT } from "./read-recovery/path-repair.ts";
 
+/**
+ * TASK-0034 composition-root adapter: Pi's built-in bash tool, never a direct
+ * Node shell. The command, timeout, cwd, and abort signal are passed through
+ * unchanged. The bash tool throws on non-zero exit, timeout, and abort, so the
+ * adapter converts that to an error outcome instead of claiming success.
+ */
+function createPiBashExecutor(): BashExecutor {
+  return {
+    async execute({ command, timeout, cwd, signal, toolCallId }: BashExecutionRequest): Promise<BashExecutionOutcome> {
+      const tool = createBashTool(cwd);
+      try {
+        const result = await tool.execute(toolCallId, { command, ...(timeout === undefined ? {} : { timeout }) }, signal);
+        return {
+          text: result.content
+            .map((block) => (block.type === "text" ? block.text : ""))
+            .filter((text) => text.length > 0)
+            .join("\n"),
+          details: result.details,
+          isError: false,
+        };
+      } catch (error) {
+        return { text: error instanceof Error ? error.message : String(error), isError: true };
+      }
+    },
+  };
+}
+
 export default function (pi: ExtensionHost) {
   const config = loadWelderConfig();
   // Whitespace-only or absent keys mean no client exists at all.
@@ -37,6 +67,8 @@ export default function (pi: ExtensionHost) {
     // Read-path repair uses its own question/instructions and is gated by the
     // readPathRepairEnabled setting plus the frozen evidence verdict.
     readPathClient: apiKey ? createTypeSafeJevClient({ apiKey, prompt: READ_PATH_PROMPT }) : undefined,
+    // Injected bash capability; the router abstains when this is absent.
+    bashExecutor: createPiBashExecutor(),
   });
 
   pi.on("session_start", async (_event, ctx) => handleSessionStart(runtime, ctx, DEFAULT_SESSION_RETENTION));

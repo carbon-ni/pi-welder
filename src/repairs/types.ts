@@ -22,6 +22,7 @@ export const REPAIR_ACTIONS = [
   "resolve-ambiguous-edit",
   "restore-read-shape",
   "restore-read-path",
+  "route-to-bash",
 ] as const;
 
 export type RepairAction = (typeof REPAIR_ACTIONS)[number];

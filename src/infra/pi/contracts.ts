@@ -23,6 +23,10 @@ export interface WelderContext {
   /** Pi mode: "tui" | "rpc" | "json". Settings UI requires "tui". */
   mode?: string;
   cwd: string;
+  /** Pi project trust for the current working directory. Missing means untrusted. */
+  isProjectTrusted?: () => boolean;
+  /** Current turn abort signal, forwarded to nested execution. */
+  signal?: AbortSignal;
   model?: { provider?: string; id?: string };
   sessionManager?: { getSessionId?: () => string };
   ui: WelderUi;

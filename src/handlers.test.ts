@@ -671,3 +671,178 @@ test("persisted shadow JSONL events contain no source, paths, or edit text", asy
     );
   }
 });
+
+// --- TASK-0034: exact bash-shaped wrong-tool execution ---------------------
+
+interface RecordedBashCall { toolCallId: string; command: string; timeout?: number; cwd: string; signal?: AbortSignal }
+
+function routeRuntime(
+  executor: { execute: (request: any) => Promise<any> },
+  overrides: Parameters<typeof createRuntime>[0] = {},
+) {
+  return createRuntime({ commandReroutingEnabled: true, bashExecutor: executor as any, ...overrides });
+}
+
+function routeCtx(overrides: Partial<any> = {}): any {
+  return ctx({ isProjectTrusted: () => true, ...overrides });
+}
+
+test("handleToolCall executes an exact bash-shaped write once and blocks it with the real output", async () => {
+  const calls: RecordedBashCall[] = [];
+  const runtime = routeRuntime({
+    execute: async (request: RecordedBashCall) => {
+      calls.push(request);
+      return { text: "hello from bash", isError: false };
+    },
+  });
+  const event = { toolName: "write", toolCallId: "route-1", input: { command: "ls -la", timeout: 30 } };
+
+  const outcome = await handleToolCall(runtime, event as any, routeCtx({ cwd: "/tmp/project" }));
+
+  assert.ok(outcome);
+  assert.deepEqual(Object.keys(outcome!).sort(), ["block", "reason"], "only Pi's supported blocking fields");
+  assert.equal(outcome!.block, true);
+  assert.match(outcome!.reason, /blocked this write call/);
+  assert.match(outcome!.reason, /hello from bash/);
+  assert.equal(outcome!.reason.includes("ls -la"), false, "the command is never echoed");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { toolCallId: "route-1", command: "ls -la", timeout: 30, cwd: "/tmp/project" });
+  assert.equal(runtime.stats.repairsByAction.get("route-to-bash"), 1);
+  assert.equal(runtime.pendingBashRoutes.has("route-1"), true);
+});
+
+test("the abort signal is forwarded and an absent timeout stays absent", async () => {
+  const calls: RecordedBashCall[] = [];
+  const runtime = routeRuntime({ execute: async (request: RecordedBashCall) => { calls.push(request); return { text: "ok", isError: false }; } });
+  const controller = new AbortController();
+
+  await handleToolCall(runtime, { toolName: "read", toolCallId: "signal-1", input: { command: "sleep 1" } } as any, routeCtx({ signal: controller.signal }));
+
+  assert.equal(calls[0]!.signal, controller.signal, "the turn signal is preserved");
+  assert.equal("timeout" in calls[0]!, false, "no invented timeout");
+});
+
+test("a failed command is reported as failed and never as success", async () => {
+  const runtime = routeRuntime({
+    execute: async () => ({ text: "boom\n\nCommand exited with code 2", isError: true }),
+  });
+
+  const outcome = await handleToolCall(runtime, { toolName: "read", toolCallId: "route-2", input: { command: "false" } } as any, routeCtx());
+
+  assert.match(outcome!.reason, /ran once through bash and failed/);
+  assert.match(outcome!.reason, /Command exited with code 2/);
+});
+
+test("an executor rejection fails closed: the original call is not blocked", async () => {
+  let calls = 0;
+  const runtime = routeRuntime({ execute: async () => { calls++; throw new Error("executor exploded"); } });
+
+  const outcome = await handleToolCall(runtime, { toolName: "edit", toolCallId: "route-3", input: { command: "echo hi" } } as any, routeCtx());
+
+  assert.equal(outcome, undefined, "no claim of success when the executor fails");
+  assert.equal(calls, 1);
+  assert.equal(runtime.pendingBashRoutes.size, 0);
+});
+
+test("handleToolCall abstains unless every mandatory condition holds", async () => {
+  const cases: { label: string; runtime: any; ctx: any; event: any }[] = [
+    { label: "setting off", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }, { commandReroutingEnabled: false }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
+    { label: "repairs disabled", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }, { repairsEnabled: false }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
+    { label: "repair rule disabled", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }, { disabledRepairs: ["route-to-bash"] }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
+    { label: "untrusted project", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx({ isProjectTrusted: () => false }), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
+    { label: "missing trust callback", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: ctx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
+    { label: "no executor", runtime: createRuntime({ commandReroutingEnabled: true }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls" } } },
+    { label: "attempted bash", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "bash", toolCallId: "c", input: { command: "ls" } } },
+    { label: "unknown tool", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "ast_map", toolCallId: "c", input: { command: "ls" } } },
+    { label: "extra field", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls", path: "a.ts" } } },
+    { label: "invalid timeout", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "ls", timeout: -1 } } },
+    { label: "empty command", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { command: "  " } } },
+    { label: "valid write shape", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", toolCallId: "c", input: { path: "a.ts", content: "x" } } },
+    { label: "missing call id", runtime: routeRuntime({ execute: async () => ({ text: "x", isError: false }) }), ctx: routeCtx(), event: { toolName: "write", input: { command: "ls" } } },
+  ];
+
+  for (const entry of cases) {
+    const outcome = await handleToolCall(entry.runtime, entry.event as any, entry.ctx);
+    assert.equal(outcome, undefined, entry.label);
+    assert.equal(entry.runtime.pendingBashRoutes.size, 0, entry.label);
+    assert.equal(entry.runtime.stats.repairsByAction.get("route-to-bash"), undefined, entry.label);
+  }
+});
+
+test("parallel call IDs stay isolated and each executes exactly once", async () => {
+  const seen: string[] = [];
+  const runtime = routeRuntime({
+    execute: async ({ command }: RecordedBashCall) => {
+      seen.push(command);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { text: `out:${command}`, isError: false };
+    },
+  });
+
+  const [first, second] = await Promise.all([
+    handleToolCall(runtime, { toolName: "write", toolCallId: "p1", input: { command: "one" } } as any, routeCtx()),
+    handleToolCall(runtime, { toolName: "read", toolCallId: "p2", input: { command: "two" } } as any, routeCtx()),
+  ]);
+
+  assert.match(first!.reason, /out:one/);
+  assert.equal(first!.reason.includes("out:two"), false, "no cross-talk between call IDs");
+  assert.match(second!.reason, /out:two/);
+  assert.equal(second!.reason.includes("out:one"), false);
+  assert.deepEqual(seen.sort(), ["one", "two"]);
+  assert.equal(runtime.pendingBashRoutes.size, 2);
+});
+
+test("a repeated call ID never executes the command twice", async () => {
+  let calls = 0;
+  const runtime = routeRuntime({ execute: async () => { calls++; return { text: "once", isError: false }; } });
+  const event = { toolName: "write", toolCallId: "dup", input: { command: "echo once" } };
+
+  const first = await handleToolCall(runtime, event as any, routeCtx());
+  const second = await handleToolCall(runtime, event as any, routeCtx());
+
+  assert.ok(first);
+  assert.equal(second, undefined, "duplicate ID abstains");
+  assert.equal(calls, 1);
+});
+
+test("the audit event carries source and target tool names only", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "welder-route-audit-"));
+  const runtime = routeRuntime({ execute: async () => ({ text: "audited output", isError: false }) });
+  await handleToolCall(runtime, { toolName: "edit", toolCallId: "audit-1", input: { command: "touch SECRET_MARKER" } } as any, routeCtx({ cwd: root }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  const raw = await (await import("node:fs/promises")).readFile(path.join(root, ".pi", "welder-log", "handlers-test.jsonl"), "utf8");
+  const events = raw.trim().split("\n").map((line) => JSON.parse(line));
+  const routed = events.find((event) => Array.isArray(event.repairs) && event.repairs.includes("route-to-bash"))!;
+  assert.equal(routed.toolName, "edit", "source tool");
+  assert.equal(routed.targetTool, "bash", "target tool");
+  assert.deepEqual(routed.inputKeys, []);
+  assert.equal(raw.includes("touch SECRET_MARKER"), false, "the command never reaches the log");
+  assert.equal(raw.includes("audited output"), false, "command output never reaches the log");
+});
+
+test("a routed call result is patched with the real bash outcome when a host emits one", async () => {
+  const runtime = routeRuntime({ execute: async () => ({ text: "patched output", details: { truncation: { truncated: false } }, isError: false }) });
+  await handleToolCall(runtime, { toolName: "write", toolCallId: "patch-1", input: { command: "echo hi" } } as any, routeCtx());
+
+  const patch = await handleToolResult(runtime, { toolName: "write", toolCallId: "patch-1", isError: true, content: [{ type: "text", text: "block reason" }] } as any, routeCtx());
+
+  assert.ok(patch);
+  assert.deepEqual((patch as any).content, [{ type: "text", text: "patched output" }]);
+  assert.equal((patch as any).isError, false);
+  assert.deepEqual((patch as any).details, { truncation: { truncated: false } });
+  assert.equal(runtime.pendingBashRoutes.size, 0, "pending state cleared on consumption");
+
+  const again = await handleToolResult(runtime, { toolName: "write", toolCallId: "patch-1", isError: true } as any, routeCtx());
+  assert.equal(again, undefined, "a consumed route is never applied twice");
+});
+
+test("session shutdown clears pending routed calls", async () => {
+  const runtime = routeRuntime({ execute: async () => ({ text: "x", isError: false }) });
+  await handleToolCall(runtime, { toolName: "write", toolCallId: "shutdown-1", input: { command: "ls" } } as any, routeCtx());
+  assert.equal(runtime.pendingBashRoutes.size, 1);
+
+  await handleSessionShutdown(runtime, routeCtx());
+
+  assert.equal(runtime.pendingBashRoutes.size, 0);
+});
