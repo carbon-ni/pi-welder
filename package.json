@@ -18,7 +18,8 @@
     "eval:mismatch": "node --experimental-strip-types scripts/mismatch-eval.ts run",
     "eval:occurrence": "node --experimental-strip-types scripts/occurrence-eval.ts run",
     "eval:tool-routing": "node --experimental-strip-types scripts/tool-routing-eval.ts run",
-    "eval:command-mapping": "node --experimental-strip-types scripts/command-mapping-eval.ts run"
+    "eval:command-mapping": "node --experimental-strip-types scripts/command-mapping-eval.ts run",
+    "eval:tool-mapping": "node --experimental-strip-types scripts/tool-mapping-eval.ts run"
   },
   "pi": {
     "extensions": ["./src/index.ts"]
