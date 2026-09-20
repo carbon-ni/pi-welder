@@ -38,9 +38,3 @@ export {
   type MappingEpisode,
   type MappingEvent,
 } from "./episode.ts";
-export {
-  createMappingShadow,
-  type MappingShadow,
-  type MappingShadowClient,
-  type MappingShadowEvidence,
-} from "./shadow.ts";
