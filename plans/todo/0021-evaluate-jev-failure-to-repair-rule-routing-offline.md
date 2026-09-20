@@ -1,9 +1,9 @@
 ---
 id: TASK-0021
 title: Evaluate Jev failure-to-repair-rule routing offline
-status: todo
+status: doing
 depends_on: []
-priority: low
+priority: high
 tags: [typesafe, routing, repairs, experiment, offline]
 ---
 
@@ -20,7 +20,14 @@ This is the safe shape of classify-then-repair: the classifier output space is b
 
 Dataset: historical failures from the existing `.pi/welder-log` corpus (which carries `errorText`). Error text can embed paths and source, so every transmitted field passes through the existing `redactShadowText` sanitizer; unsanitizable cases drop out.
 
-Sequencing: per the TASK-0019 decision record, do not run this while early shadow-label collection (TASK-0020) is the active focus. No hard dependency — start it only after the owner explicitly sequences it.
+Owner explicitly sequenced this experiment after reviewing the first `jeq` session-intent probe. Jev is evaluated only on cases left unresolved by deterministic routing; otherwise it adds no value.
+
+## Predeclared action policy
+
+- Deterministic veto and existing rule applicability checks run before Jev.
+- Jev sees only unresolved cases and returns one enumerated existing rule ID or `none`.
+- Automatic-action candidate requires confidence >=0.99, deterministic rule validation, and side-effect-free or reversible behavior.
+- Evaluation requires at least 30 labeled unresolved cases and precision >=0.99 at the threshold. Any unsafe/wrong mutating repair rejects promotion.
 
 ## Acceptance criteria
 - [ ] Output schema permits only enumerated rule IDs from the live repairs registry or "none"; unknown output fails closed.
@@ -28,7 +35,7 @@ Sequencing: per the TASK-0019 decision record, do not run this while early shado
 - [ ] Baselines reported: always-none, and deterministic keyword matching if implementable cheaply.
 - [ ] Metrics: routing precision, coverage, abstention, latency; wrong-rule selections counted and classified as visible non-mutating failures.
 - [ ] Redaction verified: captured outbound requests contain no paths, secrets, or raw source beyond capped redacted error text.
-- [ ] Decision record written with recommendation and predeclared thresholds.
+- [ ] Decision record reports overall and confidence>=0.99 precision, deterministic-baseline coverage, marginal Jev coverage, unsafe/wrong selections, and a route / don't-route / needs-more-data recommendation.
 
 ## Non-goals
 - Classifying intent to generate or rewrite tool-call content (shape 3 — refused).
