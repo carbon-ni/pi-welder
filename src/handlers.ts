@@ -19,6 +19,7 @@ import {
   buildToolResultEvent,
   pruneOldSessions,
   recordRepairs,
+  recordResultRepairStats,
   recordToolFailure,
   recordValidation,
 } from "./recorder/index.ts";
@@ -136,14 +137,14 @@ export async function handleToolCall(
     }
   }
 
-  // TASK-0022: missing-read path repair. Opt-in and independent of source
-  // shadowing; the actual mutation also requires the evidence gate to pass.
-  // While the gate fails, this is shadow-only instrumentation: eligibility is
-  // counted and nothing else happens (no API call, no mutation).
+  // TASK-0039: missing-read path repair. Opt-in and independent of source
+  // shadowing. The explicit setting plus an available client mean mutation IS
+  // enabled; there is no hidden runtime gate. Selection stays bounded (>= 0.9,
+  // max 5 candidates, 2s, zero retry) and every selection is post-validated.
   if (runtime.enabled && event.toolName === "read" && runtime.readPathRepairEnabled && runtime.readPathClient) {
     const client = runtime.readPathClient;
     const plan = await planReadPathRepair({ toolInput: input as Record<string, unknown>, cwd: ctx.cwd });
-    if (plan && runtime.readPathMutationEnabled) {
+    if (plan) {
       const selection = await runReadPathSelection({ client, plan });
       recordReadPathSelection(runtime.readPathState, selection.status);
       if (selection.status === "selected" && selection.selectedOrdinal !== undefined) {
@@ -157,9 +158,6 @@ export async function handleToolCall(
           await recordRepairEvent(ctx, event.toolName, { result: input as Record<string, unknown>, repairs });
         }
       }
-    } else if (plan) {
-      // Gate not met: shadow-only eligibility evidence, zero API calls.
-      runtime.readPathState.eligible++;
     }
   }
 
@@ -274,7 +272,7 @@ export async function handleToolResult(
     ? await repairResult(event, ctx.cwd, resultRepairRules.filter((rule) => !runtime.disabledRepairs.has(rule.name)))
     : undefined;
   if (deterministicRepair) {
-    recordRepairs(runtime.stats, deterministicRepair.repairs);
+    recordResultRepairStats(runtime.stats, deterministicRepair.repairs);
     await recordResultRepairEvent(ctx, event.toolName, event.input ?? {}, deterministicRepair.repairs);
     const evicted = runtime.episodes.open({
       kind: "result-repair",

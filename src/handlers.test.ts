@@ -34,8 +34,8 @@ test("handleToolResult converts failed read of directory into listing", async ()
   assert.match((result?.content?.[0] as { text: string }).text, /file\.ts/);
   assert.match((result?.content?.[0] as { text: string }).text, /folder\//);
   assert.equal(runtime.recovery.failures.length, 0);
-  assert.equal(runtime.stats.repairedToolCalls, 1);
-  assert.equal(runtime.stats.repairsByAction.get("directory-read"), 1);
+  assert.equal(runtime.stats.recoveriesByAction.get("directory-read"), 1);
+  assert.equal(runtime.stats.repairedToolCalls, 0, "a result patch is a recovery, not an input repair");
 });
 
 test("handleToolResult recovers a read offset past EOF", async () => {
@@ -53,7 +53,8 @@ test("handleToolResult recovers a read offset past EOF", async () => {
   assert.match((result?.content?.[0] as { text: string }).text, /two\nthree$/);
   assert.equal(runtime.recovery.failures.length, 0);
   assert.equal(runtime.stats.failedToolResults, 0);
-  assert.equal(runtime.stats.repairsByAction.get("read-offset-context"), 1);
+  assert.equal(runtime.stats.recoveriesByAction.get("read-offset-context"), 1);
+  assert.equal(runtime.stats.repairedToolCalls, 0, "a result patch is a recovery, not an input repair");
 });
 
 test("handleToolResult converts a verified no-op edit into success", async () => {
@@ -72,7 +73,9 @@ test("handleToolResult converts a verified no-op edit into success", async () =>
 
   assert.equal(result?.isError, false);
   assert.equal(runtime.recovery.failures.length, 0);
-  assert.equal(runtime.stats.repairsByAction.get("edit-noop"), 1);
+  assert.equal(runtime.stats.recoveriesByAction.get("edit-noop"), 1);
+  assert.equal(runtime.stats.recoveredResults, 1);
+  assert.equal(runtime.stats.repairedToolCalls, 0, "a result patch is not an input repair");
 });
 
 test("handleToolResult keeps no-op edit failure when its repair is disabled", async () => {
@@ -111,7 +114,10 @@ test("handleToolResult enriches ENOENT with folder tree and keeps failure signal
   assert.equal(runtime.recovery.failures.length, 1);
   assert.equal(runtime.stats.failedToolResults, 1);
   assert.equal(runtime.stats.failuresByTool.get("read"), 1);
-  assert.equal(runtime.stats.repairsByAction.get("missing-read-context"), 1);
+  assert.equal(runtime.stats.enrichmentsByAction.get("missing-read-context"), 1);
+  assert.equal(runtime.stats.enrichedResults, 1);
+  assert.equal(runtime.stats.repairedToolCalls, 0, "diagnostic enrichment is never a repair");
+  assert.equal(runtime.stats.repairsByAction.size, 0);
 });
 
 test("handleToolCall repairs input through explicit runtime", async () => {
@@ -294,30 +300,30 @@ test("read-path repair is off by default and independent of source shadowing", a
   assert.deepEqual(event.input, { path: "confg.ts" });
 });
 
-test("read-path repair with the gate unmet is shadow-only: eligibility counted, no API call, no mutation", async () => {
+test("read-path repair runs when enabled with a client: no hidden runtime gate", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
   await writeFile(path.join(root, "config.ts"), "x");
   let calls = 0;
   const client = { choose: async () => { calls++; return { choice: 1, confidence: 0.99 }; } };
-  // readPathMutationEnabled defaults to the frozen gate verdict (false).
+  // The explicit setting plus an available client mean mutation is enabled.
   const runtime = createRuntime({ readPathRepairEnabled: true, readPathClient: client as any });
   const event = { toolName: "read", toolCallId: "c", input: { path: "confg.ts" } };
 
   await handleToolCall(runtime, event as any, ctx({ cwd: root }));
 
   assert.equal(runtime.readPathState.eligible, 1);
-  assert.equal(calls, 0, "gate unmet: no API call");
-  assert.deepEqual(event.input, { path: "confg.ts" }, "gate unmet: no mutation");
-  assert.equal(runtime.stats.repairsByAction.get("restore-read-path"), undefined);
+  assert.equal(calls, 1, "one bounded request");
+  assert.equal(event.input.path, "config.ts", "the validated path is applied");
+  assert.equal(runtime.stats.repairsByAction.get("restore-read-path"), 1);
 });
 
-test("read-path repair mutates read.path exactly when the gate is met and the selection is validated", async () => {
+test("read-path repair mutates read.path exactly when the selection is validated", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "welder-readpath-"));
   await mkdir(path.join(root, "src"), { recursive: true });
   await writeFile(path.join(root, "src", "config.ts"), "x");
   let calls = 0;
   const client = { choose: async () => { calls++; return { choice: 1, confidence: 0.99, model: "jev" }; } };
-  const runtime = createRuntime({ readPathRepairEnabled: true, readPathMutationEnabled: true, readPathClient: client as any });
+  const runtime = createRuntime({ readPathRepairEnabled: true, readPathClient: client as any });
   const event = { toolName: "read", toolCallId: "c", input: { path: "src/confg.ts", limit: 10 } };
 
   await handleToolCall(runtime, event as any, ctx({ cwd: root }));
@@ -343,7 +349,7 @@ test("read-path repair leaves the call unchanged on abstain, low confidence, fai
   ];
 
   for (const choose of scenarios) {
-    const runtime = createRuntime({ readPathRepairEnabled: true, readPathMutationEnabled: true, readPathClient: { choose } as any });
+    const runtime = createRuntime({ readPathRepairEnabled: true, readPathClient: { choose } as any });
     const event = { toolName: "read", toolCallId: "c", input: { path: "src/confg.ts" } };
     await handleToolCall(runtime, event as any, ctx({ cwd: root }));
     assert.deepEqual(event.input, { path: "src/confg.ts" });
@@ -352,7 +358,7 @@ test("read-path repair leaves the call unchanged on abstain, low confidence, fai
 });
 
 test("read-path repair never mutates non-read tools or eligibility-failing reads", async () => {
-  const runtime = createRuntime({ readPathRepairEnabled: true, readPathMutationEnabled: true, readPathClient: { choose: async () => ({ choice: 1, confidence: 0.99 }) } as any });
+  const runtime = createRuntime({ readPathRepairEnabled: true, readPathClient: { choose: async () => ({ choice: 1, confidence: 0.99 }) } as any });
   const editEvent = { toolName: "edit", toolCallId: "c", input: { path: "src/confg.ts" } };
   await handleToolCall(runtime, editEvent as any, ctx());
   assert.deepEqual(editEvent.input, { path: "src/confg.ts" });

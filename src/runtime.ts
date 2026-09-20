@@ -4,7 +4,6 @@ import { createRepairWarningState, type RepairWarningState } from "./repair-warn
 import { createEpisodeTracker, type EpisodeTracker } from "./episodes.ts";
 import { createJevShadow, type JevShadow, type ShadowEvidence } from "./model-recovery/jev-shadow.ts";
 import { createReadPathState, type ReadPathState } from "./read-recovery/state.ts";
-import { READ_PATH_EVIDENCE } from "./read-recovery/evidence-gate.ts";
 import type { JevClient } from "./infra/typesafe.ts";
 import { clearBashRouteTokens, createBashRouteState, invalidateBashRoutes, type BashRouteState } from "./command-routing/wrapper.ts";
 
@@ -23,11 +22,6 @@ export interface WelderRuntime {
   commandReroutingEnabled: boolean;
   /** Bounded one-use token state for the bash-routing wrappers. */
   bashRouteState: BashRouteState;
-  /**
-   * True only when the predeclared evidence gate passes. Runtime mutation of
-   * read paths additionally requires this; it stays false until the gate does.
-   */
-  readPathMutationEnabled: boolean;
   readPathState: ReadPathState;
   jevClient?: JevClient;
   /** Separate client: read-path repair uses its own question/instructions. */
@@ -47,7 +41,6 @@ export interface RuntimeOptions {
   readPathRepairEnabled?: boolean;
   commandReroutingEnabled?: boolean;
   /** Test-only override; production derives from the frozen evidence verdict. */
-  readPathMutationEnabled?: boolean;
   jevClient?: JevClient;
   readPathClient?: JevClient;
   /** Injected in tests for deterministic ids/timestamps. */
@@ -69,7 +62,6 @@ export function createRuntime(options: RuntimeOptions = {}): WelderRuntime {
     bashRouteState: createBashRouteState({
       isEnabled: () => runtime.enabled && runtime.commandReroutingEnabled && !runtime.disabledRepairs.has("route-to-bash"),
     }),
-    readPathMutationEnabled: options.readPathMutationEnabled ?? READ_PATH_EVIDENCE.passed,
     readPathState: createReadPathState(),
     jevClient: options.jevClient,
     readPathClient: options.readPathClient,

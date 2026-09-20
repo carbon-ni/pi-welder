@@ -10,7 +10,7 @@
 export { buildEvent, buildToolResultEvent, buildEpisodeEvent, buildShadowEvent } from "./events.ts";
 export type { WelderEvent } from "./events.ts";
 export { appendEvent, loadAllEvents, listSessionLogs, pruneOldSessions, readEvents, sessionLogPath, writeFailureReport, FAILURE_REPORT_FILENAME } from "./log.ts";
-export { createStats, recordRepairs, recordToolFailure, recordValidation, statsSummary } from "./stats.ts";
+export { createStats, recordRepairs, recordEnrichment, recordRecovery, recordResultRepairStats, recordToolFailure, recordValidation, statsSummary } from "./stats.ts";
 export type { Stats } from "./stats.ts";
 export { aggregateFailures, aggregateRepairs } from "./aggregate.ts";
 export type { FailureCluster, FailureSample, RepairCluster, AggregateOptions, FailureEvent } from "./aggregate.ts";
