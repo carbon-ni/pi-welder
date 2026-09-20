@@ -131,8 +131,9 @@ export function syncRuntimeConfig(runtime: WelderRuntime, current: WelderConfig)
   setDisabledRepairs(runtime, current.disabledRepairs);
   setCommandReroutingEnabled(runtime, current.commandReroutingEnabled);
   if (runtime.prospectiveLabelsEnabled !== current.prospectiveLabelsEnabled) {
+    // Disabling persists what is pending, then stops collecting.
+    for (const record of runtime.prospectiveLabels?.closeUnresolved("expired") ?? []) runtime.onProspectiveLabel?.(record);
     runtime.prospectiveLabelsEnabled = current.prospectiveLabelsEnabled;
-    runtime.prospectiveLabels?.clear();
   }
   setSourceShadowingEnabled(runtime, current.sourceShadowingEnabled);
   try {

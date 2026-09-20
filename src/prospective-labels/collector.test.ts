@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createProspectiveLabelCollector, labelRecordIsPrivacySafe, renderLabelRecord } from "./collector.ts";
+import { createProspectiveLabelCollector, labelLineIsPrivacySafe, labelRecordIsPrivacySafe, renderLabelRecord } from "./collector.ts";
 import { appendLine } from "./writer.ts";
 
 const validation = (tool: string) => `Validation failed for tool "${tool}":\n  - path: must have required properties path\n\nReceived arguments:\n{ "execute": "SECRET" }`;
@@ -171,4 +171,33 @@ test("records are privacy-safe and the writer rejects oversized or multiline lin
   await appendLine("/tmp/x", "s.labels.jsonl", "x".repeat(5_000), { mkdirImpl: mkdirImpl as never, appendImpl: appendImpl as never });
   await appendLine("/tmp/x", "s.labels.jsonl", "two\nlines", { mkdirImpl: mkdirImpl as never, appendImpl: appendImpl as never });
   assert.equal(written.length, 1, "oversized and multiline lines are rejected");
+});
+
+test("privacy guards reject forged secret and nested fields at the write boundary", () => {
+  const { instance, labels } = collector();
+  instance.onToolStart({ toolCallId: "c1", toolName: "write", args: { execute: "printf ok" } });
+  instance.onToolEnd({ toolCallId: "c1", toolName: "write", isError: true, errorText: validation("write") });
+  instance.onToolStart({ toolCallId: "c2", toolName: "bash", args: { command: "printf ok" } });
+  instance.onToolEnd({ toolCallId: "c2", toolName: "bash", isError: false }, 1_000);
+  const record = labels[0]!;
+
+  // The rendered line is safe, and a forged top-level field is rejected.
+  assert.equal(labelLineIsPrivacySafe(renderLabelRecord(record)), true);
+  const forgedTop = JSON.parse(renderLabelRecord(record));
+  forgedTop.command = "SECRET";
+  assert.equal(labelLineIsPrivacySafe(JSON.stringify(forgedTop)), false, "unknown top-level field");
+
+  // A secret hidden inside the nested request snapshot is rejected.
+  const forgedNested = JSON.parse(renderLabelRecord(record));
+  forgedNested.request.leak = "SECRET_COMMAND";
+  assert.equal(labelLineIsPrivacySafe(JSON.stringify(forgedNested)), false, "unknown nested field");
+
+  const forgedDeep = JSON.parse(renderLabelRecord(record));
+  forgedDeep.request.plans[0].fields[0].features.leak = { deep: "SECRET" };
+  assert.equal(labelLineIsPrivacySafe(JSON.stringify(forgedDeep)), false, "unknown deep nested feature field");
+
+  // Non-object and multiline payloads fail closed.
+  assert.equal(labelLineIsPrivacySafe("not json"), false);
+  assert.equal(labelLineIsPrivacySafe(`${renderLabelRecord(record)}\nextra`), false);
+  assert.equal(labelLineIsPrivacySafe(JSON.stringify({ ...record, eventType: "other" })), false);
 });

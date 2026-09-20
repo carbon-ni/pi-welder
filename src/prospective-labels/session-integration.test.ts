@@ -82,9 +82,13 @@ async function runLifecycle(options: {
           ...(errorText ? { errorText } : {}),
         });
       });
-      pi.on("turn_end", () => collector.closeUnresolved("expired"));
+      // No turn_end closure: a correction legitimately arrives in the next turn.
     }],
   });
+
+  // Public example requires the loader to be reloaded before the session is
+  // created, otherwise inline extension factories are never invoked.
+  await loader.reload();
 
   const { session } = await createAgentSession({
     cwd: root,
@@ -155,12 +159,37 @@ test("AgentSession lifecycle: a corrected call that fails is an error result", a
  * therefore asserted here, and the collector itself is unit-tested against the
  * documented event shapes.
  */
-test("AgentSession lifecycle: the inline extension factory is not invoked by createAgentSession (documented blocker)", async () => {
+test("AgentSession lifecycle: the loader reload wires the inline factory and one label is recorded", async () => {
   const harness = await runLifecycle({ calls: [{ tool: "write", args: { execute: "printf ok" } }, { tool: "bash", args: { command: "printf ok" } }] });
   try {
+    assert.equal(harness.factoryRan, true, "reload() invokes the inline extension factory");
     await harness.run();
-    assert.equal(harness.factoryRan, false, "if this ever flips, wire the collector directly and delete this blocker note");
-    assert.equal(harness.records.length, 0, "no records because no extension events were delivered");
+    const labelled = harness.records.filter((record) => record.outcome === "labelled");
+    assert.equal(labelled.length, 1, JSON.stringify(harness.records.map((record) => `${record.outcome}:${record.sourceTool}->${record.targetTool}`)));
+    assert.equal(labelled[0]!.sourceTool, "write");
+    assert.equal(labelled[0]!.targetTool, "bash");
+    assert.ok(labelled[0]!.pairs.includes("command<-execute"));
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("AgentSession lifecycle: a failing corrected call records no label", async () => {
+  const harness = await runLifecycle({ calls: [{ tool: "write", args: { execute: "printf ok" } }, { tool: "bash", args: { command: "exit 3" } }] });
+  try {
+    await harness.run();
+    assert.equal(harness.records.filter((record) => record.outcome === "labelled").length, 0);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("AgentSession lifecycle: disabled collects nothing even with the factory wired", async () => {
+  const harness = await runLifecycle({ calls: [{ tool: "write", args: { execute: "printf ok" } }, { tool: "bash", args: { command: "printf ok" } }], enabled: false });
+  try {
+    assert.equal(harness.factoryRan, true);
+    await harness.run();
+    assert.equal(harness.records.length, 0);
   } finally {
     await harness.cleanup();
   }

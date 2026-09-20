@@ -29,7 +29,7 @@ import { buildRestoreReadReason, recognizeReadShapedEdit } from "./read-shape.ts
 import { planReadPathRepair, runReadPathSelection, validateReadPathSelection } from "./read-recovery/path-repair.ts";
 import { recordReadPathSelection } from "./read-recovery/state.ts";
 import { sentinelTokenOf } from "./command-routing/wrapper.ts";
-import { renderLabelRecord, type LabelRecord } from "./prospective-labels/collector.ts";
+import { labelLineIsPrivacySafe, labelRecordIsPrivacySafe, renderLabelRecord, type LabelRecord } from "./prospective-labels/collector.ts";
 import { appendLine } from "./prospective-labels/writer.ts";
 import { clearBashRouteTokens } from "./command-routing/wrapper.ts";
 
@@ -64,6 +64,8 @@ export async function handleSessionStart(
 }
 
 export async function handleSessionShutdown(runtime: WelderRuntime, ctx: WelderContext): Promise<void> {
+  // Pending windows are persisted as interrupted before any state is cleared.
+  await handleProspectiveLabelClosure(runtime, "interrupted", ctx);
   runtime.prospectiveLabels?.clear();
   clearBashRouteTokens(runtime.bashRouteState);
   await runtime.jevShadow?.shutdown().catch(() => { /* never block shutdown */ });
@@ -390,5 +392,9 @@ function errorTextOf(result: unknown): string | undefined {
 
 /** Persist a privacy-safe record; never fails the tool flow. */
 export async function persistLabelRecord(ctx: WelderContext, record: LabelRecord): Promise<void> {
-  await appendLine(logDir(ctx), `${sessionId(ctx)}.labels.jsonl`, renderLabelRecord(record)).catch(() => { /* logging never breaks tool flow */ });
+  // Privacy is enforced at the write boundary, not by the caller.
+  if (!labelRecordIsPrivacySafe(record)) return;
+  const line = renderLabelRecord(record);
+  if (!labelLineIsPrivacySafe(line)) return;
+  await appendLine(logDir(ctx), `${sessionId(ctx)}.labels.jsonl`, line).catch(() => { /* logging never breaks tool flow */ });
 }

@@ -113,7 +113,14 @@ export default function (pi: ExtensionHost) {
   // pre-validation arguments; `tool_execution_end` confirms a validation failure.
   pi.on("tool_execution_start", async (event) => handleToolExecutionStart(runtime, event));
   pi.on("tool_execution_end", async (event, ctx) => handleToolExecutionEnd(runtime, event, ctx));
-  pi.on("turn_end", async (_event, ctx) => handleProspectiveLabelClosure(runtime, "expired", ctx));
+  // TASK-0037: close unresolved episodes on a real user boundary, when the
+  // agent settles, and on shutdown. `turn_end` is deliberately NOT used so a
+  // normal automatic next turn keeps the window open.
+  pi.on("input", async (_event, ctx) => handleProspectiveLabelClosure(runtime, "expired", ctx));
+  // `agent_settled` is deliberately NOT a closure hook: it fires between turns,
+  // and a correction usually arrives in the very next turn. Closing there loses
+  // the label (proven by the AgentSession lifecycle test). The three-call
+  // window, a real user `input`, disable, and shutdown are the boundaries.
 
   pi.on("tool_call", async (event, ctx) => handleToolCall(runtime, event, ctx));
 

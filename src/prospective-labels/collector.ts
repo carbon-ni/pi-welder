@@ -14,6 +14,7 @@
 
 import { planMappings, type MappingPlan } from "../tool-mapping/planner.ts";
 import { buildToolMappingRequest } from "../tool-mapping/evaluation.ts";
+import type { MappingPair } from "../tool-mapping/planner.ts";
 import { TOOL_CONTRACTS } from "../tool-routing/contracts.ts";
 import { planMatchesCall } from "../tool-mapping/episode.ts";
 
@@ -49,11 +50,17 @@ export interface LabelRecord {
   latencyMs: number;
 }
 
+interface PlanMeta { ordinal: number; targetTool: string; pairs: MappingPair[] }
+
 interface PendingEpisode {
   episodeId: string;
   sourceTool: string;
   request: unknown;
-  plans: MappingPlan[];
+  /** At most one bounded original-argument snapshot; never a plan copy. */
+  args: Record<string, unknown>;
+  argsBytes: number;
+  /** Mapping metadata only: no values. */
+  plans: PlanMeta[];
   /**
    * Sequence number at confirmation time. Every call that started before the
    * failure was confirmed (the failing call and any parallel siblings already
@@ -87,6 +94,16 @@ export interface ProspectiveLabelCollector {
   clear(): void;
 }
 
+/** Rebuilds a plan from metadata + the bounded snapshot; undefined if incomplete. */
+function derivePlan(meta: PlanMeta, snapshot: Record<string, unknown>): MappingPlan | undefined {
+  const args: Record<string, unknown> = {};
+  for (const pair of meta.pairs) {
+    if (!Object.prototype.hasOwnProperty.call(snapshot, pair.from)) return undefined;
+    args[pair.to] = snapshot[pair.from];
+  }
+  return { ordinal: meta.ordinal, targetTool: meta.targetTool, pairs: meta.pairs, args };
+}
+
 export function createProspectiveLabelCollector(options: {
   isEnabled: () => boolean;
   sessionId: () => string;
@@ -102,7 +119,10 @@ export function createProspectiveLabelCollector(options: {
   let sequence = 0;
 
   const forget = (toolCallId: string): void => {
+    const episode = pending.get(toolCallId);
+    if (episode !== undefined) retainedBytes -= episode.argsBytes;
     pending.delete(toolCallId);
+    stats.retainedRawBytes = retainedBytes;
     const index = confirmedOrder.indexOf(toolCallId);
     if (index >= 0) confirmedOrder.splice(index, 1);
   };
@@ -177,11 +197,22 @@ export function createProspectiveLabelCollector(options: {
           stats.ineligible++;
           return [];
         }
+        const argsBytes = Buffer.byteLength(JSON.stringify(started.args), "utf8");
+        if (retainedBytes + argsBytes > MAX_TOTAL_RAW_BYTES) {
+          dropStart(event.toolCallId);
+          stats.evictedStarts++;
+          stats.retainedRawBytes = retainedBytes;
+          return [];
+        }
+        retainedBytes += argsBytes;
+        stats.retainedRawBytes = retainedBytes;
         pending.set(event.toolCallId, {
           episodeId: `${options.sessionId()}#${event.toolCallId}`,
           sourceTool: event.toolName,
           request: buildToolMappingRequest(event.toolName, enumeration.plans, started.args as Record<string, unknown>).state,
-          plans: enumeration.plans,
+          args: started.args as Record<string, unknown>,
+          argsBytes,
+          plans: enumeration.plans.map((plan) => ({ ordinal: plan.ordinal, targetTool: plan.targetTool, pairs: plan.pairs })),
           confirmedSequence: sequence,
           openedAt: now,
         });
@@ -208,9 +239,13 @@ export function createProspectiveLabelCollector(options: {
           continue;
         }
         if (started.toolName !== event.toolName) continue;
+        void 0;
         if (started.args === null || typeof started.args !== "object" || Array.isArray(started.args)) continue;
         const successArgs = started.args as Record<string, unknown>;
-        const matching = episode.plans.find((plan) => planMatchesCall(plan, { id, ts: "", kind: "toolCall", toolName: event.toolName, args: successArgs }));
+        const matching = episode.plans.find((meta) => {
+          const derived = derivePlan(meta, episode.args);
+          return derived !== undefined && planMatchesCall(derived, { id, ts: "", kind: "toolCall", toolName: event.toolName, args: successArgs });
+        });
         if (matching === undefined) continue;
         const record: LabelRecord = {
           ts: new Date(now).toISOString(),
@@ -288,6 +323,88 @@ export function renderLabelRecord(record: LabelRecord): string {
     interveningCalls: record.interveningCalls,
     latencyMs: record.latencyMs,
   });
+}
+
+/**
+ * Line-level guard: the rendered JSON must contain only expected top-level
+ * fields, and every nested value is re-checked so a forged extra or secret
+ * field can never reach the writer.
+ */
+export function labelLineIsPrivacySafe(line: string): boolean {
+  if (line.includes("\n")) return false;
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return false; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const record = parsed as Record<string, unknown>;
+  const expected = new Set(["ts", "eventType", "sessionId", "episodeId", "outcome", "sourceTool", "targetTool", "planOrdinal", "pairs", "request", "interveningCalls", "latencyMs"]);
+  if (Object.keys(record).some((key) => !expected.has(key))) return false;
+  if (record.eventType !== "prospective-label") return false;
+  if (typeof record.ts !== "string" || Number.isNaN(Date.parse(record.ts))) return false;
+  const identifier = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
+  for (const key of ["sessionId", "episodeId", "sourceTool"]) {
+    if (typeof record[key] !== "string") return false;
+  }
+  if (typeof record.sourceTool !== "string" || !identifier.test(record.sourceTool)) return false;
+  if (record.targetTool !== undefined && (typeof record.targetTool !== "string" || !identifier.test(record.targetTool))) return false;
+  if (!Array.isArray(record.pairs) || record.pairs.some((pair) => typeof pair !== "string")) return false;
+  if (!Number.isInteger(record.interveningCalls) || !Number.isInteger(record.latencyMs)) return false;
+  return requestStateIsSafe(record.request);
+}
+
+/** Closed key sets for the persisted judge-input snapshot. */
+const REQUEST_KEYS = new Set(["attemptedTool", "failureClass", "targets", "plans", "prior"]);
+const PLAN_KEYS = new Set(["ordinal", "targetTool", "fields"]);
+const FIELD_KEYS = new Set(["from", "role", "features"]);
+const FEATURE_KEYS = new Set(["kind", "shape", "lengthBucket", "tokenBucket", "itemBucket"]);
+const PRIOR_KEYS = new Set(["priorToolNames", "priorFailedCalls"]);
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_-]{0,60}$/;
+
+/**
+ * The replay snapshot must be exactly the closed TASK-0036 request state: an
+ * unknown key anywhere (a forged secret field) fails the write.
+ */
+export function requestStateIsSafe(request: unknown): boolean {
+  if (!request || typeof request !== "object" || Array.isArray(request)) return false;
+  const state = request as Record<string, unknown>;
+  if (Object.keys(state).some((key) => !REQUEST_KEYS.has(key))) return false;
+  if (typeof state.attemptedTool !== "string" || !IDENTIFIER.test(state.attemptedTool)) return false;
+  if (state.failureClass !== "schema-validation") return false;
+  if (!Array.isArray(state.targets) || state.targets.some((target) => typeof target !== "string" || !IDENTIFIER.test(target))) return false;
+  if (!Array.isArray(state.plans)) return false;
+  for (const plan of state.plans) {
+    if (!plan || typeof plan !== "object" || Array.isArray(plan)) return false;
+    const entry = plan as Record<string, unknown>;
+    if (Object.keys(entry).some((key) => !PLAN_KEYS.has(key))) return false;
+    if (typeof entry.ordinal !== "number" || typeof entry.targetTool !== "string" || !IDENTIFIER.test(entry.targetTool)) return false;
+    if (!Array.isArray(entry.fields)) return false;
+    for (const field of entry.fields) {
+      if (!field || typeof field !== "object" || Array.isArray(field)) return false;
+      const spec = field as Record<string, unknown>;
+      if (Object.keys(spec).some((key) => !FIELD_KEYS.has(key))) return false;
+      if (typeof spec.from !== "string" || !IDENTIFIER.test(spec.from)) return false;
+      if (typeof spec.role !== "string" || !IDENTIFIER.test(spec.role)) return false;
+      const features = spec.features as Record<string, unknown> | undefined;
+      if (!features || typeof features !== "object" || Array.isArray(features)) return false;
+      if (Object.keys(features).some((key) => !FEATURE_KEYS.has(key))) return false;
+    }
+  }
+  const prior = state.prior as Record<string, unknown> | undefined;
+  if (!prior || typeof prior !== "object" || Array.isArray(prior)) return false;
+  if (Object.keys(prior).some((key) => !PRIOR_KEYS.has(key))) return false;
+  if (!Array.isArray(prior.priorToolNames) || prior.priorToolNames.some((name) => typeof name !== "string" || !IDENTIFIER.test(name))) return false;
+  if (!Number.isInteger(prior.priorFailedCalls)) return false;
+  return true;
+}
+
+/** Nested walk: bounded depth, primitives only, closed feature vocabulary. */
+function nestedIsSafe(value: unknown, depth: number): boolean {
+  if (depth > 6) return false;
+  if (value === null || typeof value === "boolean" || typeof value === "number") return true;
+  if (typeof value === "string") return value.length <= 200 && !value.includes("\n");
+  if (Array.isArray(value)) return value.length <= 40 && value.every((entry) => nestedIsSafe(entry, depth + 1));
+  if (typeof value !== "object") return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= 24 && entries.every(([key, entry]) => key.length <= 60 && nestedIsSafe(entry, depth + 1));
 }
 
 /** Guard used by tests and the writer: no value text can appear in a record. */
