@@ -16,8 +16,10 @@ pi -e npm:@carbon-ni/pi-welder           # try it for one run only
 
 Pi provides `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and
 `typebox` itself, so they are declared as `peerDependencies` with a `"*"` range
-and are never bundled. The package ships only runtime source plus
-`README.md` and `LICENSE`; tests, plans, scripts, and local state are excluded.
+and are never bundled; the package has no runtime dependencies. It ships only
+runtime source plus `README.md` and `LICENSE` — tests, plans, scripts, and local
+state are excluded, and `npm run verify:package` proves both the contents and a
+real consumer install.
 
 ## What it does
 
@@ -180,7 +182,7 @@ npm test               # extension tests
 npm run test:scripts   # release/package script tests
 npm run lint           # tsc --noEmit
 npm run check          # lint + both test suites
-npm run verify:package # pack once, isolated consumer, real Pi host load
+npm run verify:package # pack once, real npm consumer install, real Pi host load
 make verify            # everything above
 ```
 

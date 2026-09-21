@@ -44,9 +44,14 @@ action. The automation itself never creates remote state.
 - `npm pack --pack-destination .release` — exactly one tarball, no rebuilds;
 - `sha256sum` into `.release/SHA256SUMS`;
 - `PACKAGE_TARBALL=<tarball> npm run verify:package` — verifies **that** tarball:
-  identity, contents against the runtime import closure, isolated pinned-peer
-  consumer install, load through the real Pi host loader, and a real `pi`
-  process started with the packed extension offline;
+  identity, contents against the runtime import closure, a real isolated
+  consumer (`npm ci` of the committed pinned fixture, then
+  `npm install <tarball> --ignore-scripts --no-save`, which leaves the lock
+  untouched), no links back to the checkout, peer versions asserted under the
+  consumer, and proof that the installed extension loads inside the real Pi host
+  offline (a control extension inside that host imports the packed entrypoint and
+  reports success). The consumer install needs network or an npm cache; the host
+  load itself runs with `PI_OFFLINE=1`;
 - uploads the tarball and `SHA256SUMS` as the `release-artifact` workflow
   artifact.
 
@@ -95,9 +100,13 @@ No remote state is touched by these commands:
 
 ```bash
 make all                 # lint + extension tests + script tests
-make package-verify      # pack once, isolated consumer, real Pi host load
+make package-verify      # pack once, real isolated consumer, real Pi host load
 npm pack --dry-run       # inspect the exact file list
 ```
+
+`verify-package.mjs` resolves its own paths, so it can be run from any working
+directory, and it reuses `PACKAGE_TARBALL` instead of packing again when the
+quality gate hands one over.
 
 Publishing from a workstation is intentionally unsupported: provenance and OIDC
 come from the workflow identity.

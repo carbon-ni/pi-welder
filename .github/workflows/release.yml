@@ -61,12 +61,16 @@ jobs:
         with:
           name: release-artifact
           path: .release
+      # Every release value reaches the script through the environment. Never
+      # interpolate `github.event` inside a `run` body: it is attacker-adjacent
+      # input. See scripts/release-workflow.test.mjs, which enforces this.
       - name: Verify release identity
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
         run: |
           test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
-          test "${{ github.event.release.name }}" != ""
+          test -n "$RELEASE_NAME"
       - name: Select the verified artifact
         run: |
           tarball="$(find .release -name '*.tgz' -print -quit)"
