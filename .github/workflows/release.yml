@@ -26,10 +26,13 @@ jobs:
       - run: make all
       - name: Pack and verify the canonical artifact once
         run: |
+          # Always start from an empty artifact directory: a reused runner must
+          # not be able to contribute stale files to the uploaded artifact.
+          rm -rf .release
           mkdir -p .release
           npm pack --pack-destination .release
-          tarball="$(find .release -name '*.tgz' -print -quit)"
-          test -n "$tarball"
+          # Exactly one tarball, never "the first match".
+          tarball="$(node scripts/release-artifact-path.mjs .release)"
           # The manifest records the bare filename, so it matches the layout
           # `actions/download-artifact` produces for the publish job.
           node scripts/release-checksum.mjs "$tarball"
@@ -77,8 +80,7 @@ jobs:
           test -n "$RELEASE_NAME"
       - name: Select the verified artifact
         run: |
-          tarball="$(find .release -name '*.tgz' -print -quit)"
-          test -n "$tarball"
+          tarball="$(node scripts/release-artifact-path.mjs .release)"
           echo "TARBALL=$tarball" >> "$GITHUB_ENV"
       - name: Publish or resume the exact artifact
         env:

@@ -92,6 +92,24 @@ test("release event values reach scripts only through the environment", async ()
   assert.equal(source.includes('test "${{ github.event.release.name }}"'), false, "no inline release name in a script");
 });
 
+test("the gate starts from an empty artifact directory and never picks a first match", async () => {
+  const source = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
+  const bodies = runBodies(source);
+  const packBody = bodies.find(({ body }) => body.includes("npm pack"));
+  assert.ok(packBody, "the pack step exists");
+
+  assert.ok(packBody.body.includes("rm -rf .release"), "the artifact directory is emptied first");
+  assert.ok(packBody.body.includes("mkdir -p .release"), "and recreated before packing");
+  assert.ok(
+    packBody.body.indexOf("rm -rf .release") < packBody.body.indexOf("npm pack --pack-destination .release"),
+    "emptying happens before packing",
+  );
+
+  assert.equal(source.includes("-print -quit"), false, "no step selects the first tarball");
+  const resolutions = bodies.filter(({ body }) => body.includes("release-artifact-path.mjs"));
+  assert.equal(resolutions.length, 2, "both jobs resolve the single artifact through the script");
+});
+
 test("the gate writes the checksum through the tested script, not a raw sha256sum", async () => {
   const source = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
   const packBody = runBodies(source).find(({ body }) => body.includes("npm pack"));

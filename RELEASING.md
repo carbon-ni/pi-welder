@@ -44,7 +44,11 @@ only the publish job holds `contents: write` and `id-token: write`.
 **Quality gate** (job `quality-gate`, checked out at the release tag):
 
 - `npm ci`, then `make all` — lint, extension tests, script tests;
-- `npm pack --pack-destination .release` — exactly one tarball, no rebuilds;
+- starts from an **empty** artifact directory (`rm -rf .release && mkdir -p .release`)
+  so a reused runner cannot contribute stale files, then
+  `npm pack --pack-destination .release`;
+- `node scripts/release-artifact-path.mjs .release` — resolves the single tarball
+  and fails on zero or more than one, instead of picking the first match;
 - `node scripts/release-checksum.mjs "$tarball"`, which writes
   `.release/SHA256SUMS` next to the artifact with the **bare filename**. A raw
   `sha256sum "$tarball"` would record the path it was given, and the publish job —
@@ -67,7 +71,8 @@ only the publish job holds `contents: write` and `id-token: write`.
 **Publish** (job `publish`, only when the gate succeeded):
 
 - downloads `release-artifact` — it never repacks, so the published bytes are
-  the verified bytes;
+  the verified bytes — and resolves the tarball through the same
+  single-artifact script, which fails on a multi-tarball artifact;
 - re-checks tag identity and that the Release name is not empty;
 - runs `scripts/release-publish.mjs`, which:
   - first validates the local evidence: `SHA256SUMS` must be well formed, name the
