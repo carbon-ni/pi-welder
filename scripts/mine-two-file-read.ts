@@ -9,7 +9,6 @@
  *
  * Usage: node --experimental-strip-types scripts/mine-two-file-read.ts [sessionsDir] [outFile]
  */
-import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { homedir } from "node:os";
 import * as path from "node:path";
@@ -34,6 +33,7 @@ interface PiMessage {
   toolName?: string;
   isError?: boolean;
   content?: unknown;
+  details?: { missingReadContext?: { truncated?: boolean } };
 }
 
 interface ToolCallBlock {
@@ -43,9 +43,14 @@ interface ToolCallBlock {
   arguments?: Record<string, unknown>;
 }
 
-/** Short, non-reversible session digest: enough to count concentration. */
-function sessionDigest(file: string): string {
-  return createHash("sha256").update(path.relative(process.cwd(), file)).digest("hex").slice(0, 32);
+/**
+ * Canonical, cwd-independent session identity: the session's own recorded id
+ * when present, plus the resolved file path. The miner hashes it, so neither
+ * value is persisted.
+ */
+export async function sessionIdentity(file: string, sessionId: string | undefined): Promise<string> {
+  const canonical = await fs.realpath(file).catch(() => path.resolve(file));
+  return `${sessionId ?? ""}\u0000${canonical}`;
 }
 
 function textOf(content: unknown): string {
@@ -61,7 +66,7 @@ function textOf(content: unknown): string {
  * Replays one session file into the ordered `read` calls it contains. A read
  * call without a matching result is dropped: we only count observed outcomes.
  */
-export function readCallsFromSession(content: string): { cwd: string; calls: SessionReadCall[] } {
+export function readCallsFromSession(content: string): { cwd: string; sessionId: string | undefined; calls: SessionReadCall[] } {
   const records: PiRecord[] = [];
   for (const line of content.split("\n")) {
     if (line.trim() === "") continue;
@@ -72,7 +77,9 @@ export function readCallsFromSession(content: string): { cwd: string; calls: Ses
     }
   }
 
-  const recordedCwd = records.find((record) => record.type === "session" && typeof record.cwd === "string")?.cwd ?? process.cwd();
+  const sessionRecord = records.find((record) => record.type === "session");
+  const recordedCwd = typeof sessionRecord?.cwd === "string" ? sessionRecord.cwd : process.cwd();
+  const sessionId = typeof (sessionRecord as { id?: unknown } | undefined)?.id === "string" ? (sessionRecord as { id: string }).id : undefined;
   const callById = new Map<string, { path: string }>();
   for (const record of records) {
     const message = record.message;
@@ -98,9 +105,10 @@ export function readCallsFromSession(content: string): { cwd: string; calls: Ses
       isError: message.isError === true,
       missing: message.isError === true && isMissingError(errorText),
       resultText: errorText,
+      detailsTruncated: message.details?.missingReadContext?.truncated === true,
     });
   }
-  return { cwd: recordedCwd, calls };
+  return { cwd: recordedCwd, sessionId, calls };
 }
 
 /** Every session file under a Pi sessions directory. */
@@ -126,8 +134,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const sessions: SessionInput[] = [];
   for (const file of files) {
     const content = await fs.readFile(file, "utf8").catch(() => "");
-    const { cwd, calls } = readCallsFromSession(content);
-    sessions.push({ sessionKey: sessionDigest(file), cwd, calls });
+    const { cwd, sessionId, calls } = readCallsFromSession(content);
+    sessions.push({ sessionKey: await sessionIdentity(file, sessionId), cwd, calls });
   }
 
   const mined = mineTwoFileSelections(sessions);

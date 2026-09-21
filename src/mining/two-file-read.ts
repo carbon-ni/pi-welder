@@ -149,6 +149,12 @@ export interface SessionReadCall {
   missing: boolean;
   /** The tool result text as recorded, or "" when there was none. */
   resultText: string;
+  /**
+   * `details.missingReadContext.truncated` as recorded. A byte cut can remove
+   * the rendered "… tree truncated" marker, so the structured flag is the
+   * authoritative truncation signal.
+   */
+  detailsTruncated?: boolean;
 }
 
 /** A directory snapshot taken from a historical missing-read error message. */
@@ -304,7 +310,7 @@ export function mineTwoFileSelections(sessions: readonly SessionInput[]): TwoFil
       missingReads += 1;
 
       const snapshot = parseMissingReadSnapshot(call.resultText);
-      if (!snapshot || snapshot.truncated) {
+      if (!snapshot || snapshot.truncated || call.detailsTruncated === true) {
         snapshotIneligible += 1;
         return;
       }

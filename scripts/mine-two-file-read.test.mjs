@@ -34,9 +34,9 @@ async function withCorpus(run) {
   await mkdir(workspace, { recursive: true });
 
   await writeFile(path.join(workspace, "session-with-read.jsonl"), lines([
-    { type: "session", cwd: "/repo" },
+    { type: "session", id: "01a0bebc-1c5e-7942-8f3a-6cbc7cb9f897", cwd: "/repo" },
     { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/helpers.ts" } }] } },
-    { type: "message", message: { role: "toolResult", toolCallId: "call-1", toolName: "read", isError: true, content: [{ type: "text", text: snapshotText }] } },
+    { type: "message", message: { role: "toolResult", toolCallId: "call-1", toolName: "read", isError: true, content: [{ type: "text", text: snapshotText }], details: { missingReadContext: { truncated: false } } } },
     { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "call-2", name: "read", arguments: { path: "src/helpers.test.ts" } }] } },
     { type: "message", message: { role: "toolResult", toolCallId: "call-2", toolName: "read", isError: false, content: [{ type: "text", text: "file body" }] } },
   ]));
@@ -85,6 +85,26 @@ test("the evidence carries no paths, names, cwd, error text, or session keys", a
 
     for (const leak of ["helpers", "utils", "/repo", "ENOENT", "session-with-read", "ws-a", "file body"]) {
       assert.equal(text.includes(leak), false, `evidence leaked ${leak}`);
+    }
+  });
+});
+
+test("the same corpus yields byte-identical evidence from different working directories", async () => {
+  await withCorpus(async ({ root, outFile }) => {
+    const firstDir = await mkdtemp(path.join(tmpdir(), "welder-cwd-a-"));
+    const secondDir = await mkdtemp(path.join(tmpdir(), "welder-cwd-b-"));
+    const secondOut = path.join(root, "evidence-2.json");
+    try {
+      await execFile(process.execPath, ["--experimental-strip-types", script, root, outFile], { cwd: firstDir });
+      await execFile(process.execPath, ["--experimental-strip-types", script, root, secondOut], { cwd: secondDir });
+
+      const first = await readFile(outFile, "utf8");
+      const second = await readFile(secondOut, "utf8");
+      assert.equal(second, first, "session ids and output must not depend on the invocation cwd");
+      assert.equal(JSON.parse(first).records[0].sessionId, JSON.parse(second).records[0].sessionId);
+    } finally {
+      await rm(firstDir, { recursive: true, force: true });
+      await rm(secondDir, { recursive: true, force: true });
     }
   });
 });

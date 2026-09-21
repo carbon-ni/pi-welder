@@ -37,12 +37,16 @@ function snapshot(root: string, entries: readonly string[], options: { truncated
   ].join("\n");
 }
 
-const call = (path: string, options: { error?: boolean; missing?: boolean; result?: string } = {}): SessionReadCall => ({
+const call = (
+  path: string,
+  options: { error?: boolean; missing?: boolean; result?: string; detailsTruncated?: boolean } = {},
+): SessionReadCall => ({
   identifier: `id:${path}`,
   path,
   isError: options.error === true,
   missing: options.missing === true,
   resultText: options.result ?? "",
+  ...(options.detailsTruncated === undefined ? {} : { detailsTruncated: options.detailsTruncated }),
 });
 
 const session = (calls: readonly SessionReadCall[], sessionKey = "s1"): SessionInput => ({ sessionKey, cwd: CWD, calls });
@@ -146,6 +150,32 @@ test("an ineligible snapshot never becomes a selection", () => {
   const nested = snapshot("/repo/src", ["helpers.test.ts", "utils.ts", "sub/"]);
   const mined = mineTwoFileSelections([session([call("src/helpers.ts", { error: true, missing: true, result: nested })])]);
   assert.equal(mined.records.length, 1, "a subdirectory does not disqualify the two direct files");
+});
+
+test("the structured truncation flag disqualifies an otherwise complete snapshot", () => {
+  // The real repair sets details.missingReadContext.truncated when the rendered
+  // context exceeded its byte budget, which can cut the "… tree truncated"
+  // marker out of the content. The structured flag must still disqualify it.
+  const complete = snapshot("/repo/src", ["helpers.test.ts", "utils.ts"]);
+  assert.equal(complete.includes("truncated"), false, "the content carries no marker");
+
+  const result = mineTwoFileSelections([
+    session([
+      call("src/helpers.ts", { error: true, missing: true, result: complete, detailsTruncated: true }),
+      call("src/helpers.test.ts"),
+    ]),
+  ]);
+
+  assert.equal(result.records.length, 0);
+  assert.equal(result.snapshotIneligible, 1);
+
+  const withoutFlag = mineTwoFileSelections([
+    session([
+      call("src/helpers.ts", { error: true, missing: true, result: complete, detailsTruncated: false }),
+      call("src/helpers.test.ts"),
+    ]),
+  ]);
+  assert.equal(withoutFlag.records.length, 1, "an explicit false stays eligible");
 });
 
 test("a windows-style requested path matches an absolute windows snapshot root", () => {
