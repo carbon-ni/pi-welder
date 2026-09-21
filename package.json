@@ -114,6 +114,7 @@
     "mine:episodes": "node --experimental-strip-types scripts/episode-mine.ts run",
     "eval:mismatch": "node --experimental-strip-types scripts/mismatch-eval.ts run",
     "eval:occurrence": "node --experimental-strip-types scripts/occurrence-eval.ts run",
-    "eval:tool-routing": "node --experimental-strip-types scripts/tool-routing-eval.ts run"
+    "eval:tool-routing": "node --experimental-strip-types scripts/tool-routing-eval.ts run",
+    "mine:two-file-read": "node --experimental-strip-types scripts/mine-two-file-read.ts"
   }
 }
