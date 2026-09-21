@@ -1,7 +1,7 @@
 ---
 id: TASK-0043
 title: Collect evidence for two-file missing-read heuristic
-status: doing
+status: done
 depends_on: [TASK-0039]
 priority: high
 tags: [read, enoent, heuristic, shadow, evidence]
