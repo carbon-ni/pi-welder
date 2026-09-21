@@ -366,7 +366,20 @@ export interface TwoFileSummary {
   labelsWrong: number;
   precision: number | undefined;
   attrition: { stage: string; remaining: number }[];
-  reasons: { reason: TwoFileReason; count: number }[];
+  /**
+   * Per prediction reason: how often it fired, how many of those predictions a
+   * later read ever observed, and how they turned out. `precision` uses only the
+   * observed denominator, so unresolved selections neither help nor hurt.
+   */
+  reasons: {
+    reason: TwoFileReason;
+    selections: number;
+    observed: number;
+    correct: number;
+    wrong: number;
+    unresolved: number;
+    precision: number | undefined;
+  }[];
   sessionConcentration: { contributingSessions: number; maxLabelsInOneSession: number };
   insufficient: boolean;
 }
@@ -383,9 +396,16 @@ export function summarizeTwoFileMining(
   const observed = mined.records.filter((record) => record.observed !== null);
   const correct = observed.filter((record) => record.outcome === "correct").length;
 
-  const reasonCounts = new Map<TwoFileReason, number>();
+  const byReason = new Map<TwoFileReason, { selections: number; observed: number; correct: number; wrong: number }>();
   for (const record of mined.records) {
-    reasonCounts.set(record.prediction.reason, (reasonCounts.get(record.prediction.reason) ?? 0) + 1);
+    const row = byReason.get(record.prediction.reason) ?? { selections: 0, observed: 0, correct: 0, wrong: 0 };
+    row.selections += 1;
+    if (record.observed !== null) {
+      row.observed += 1;
+      if (record.outcome === "correct") row.correct += 1;
+      else row.wrong += 1;
+    }
+    byReason.set(record.prediction.reason, row);
   }
 
   const perSession = new Map<string, number>();
@@ -413,9 +433,17 @@ export function summarizeTwoFileMining(
       { stage: "observed-labels", remaining: observed.length },
       { stage: "labels-correct", remaining: correct },
     ],
-    reasons: [...reasonCounts.entries()]
-      .map(([reason, count]) => ({ reason, count }))
-      .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason)),
+    reasons: [...byReason.entries()]
+      .map(([reason, row]) => ({
+        reason,
+        selections: row.selections,
+        observed: row.observed,
+        correct: row.correct,
+        wrong: row.wrong,
+        unresolved: row.selections - row.observed,
+        precision: row.observed === 0 ? undefined : row.correct / row.observed,
+      }))
+      .sort((left, right) => right.selections - left.selections || left.reason.localeCompare(right.reason)),
     sessionConcentration: {
       contributingSessions: perSession.size,
       maxLabelsInOneSession: perSession.size === 0 ? 0 : Math.max(...perSession.values()),

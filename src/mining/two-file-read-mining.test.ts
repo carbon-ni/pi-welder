@@ -232,8 +232,64 @@ test("wrong observed predictions lower precision, and insufficiency is label-bas
   assert.equal(summary.observedLabels, 1);
   assert.equal(summary.labelsWrong, 1);
   assert.equal(summary.precision, 0);
-  assert.deepEqual(summary.reasons, [{ reason: "test-spec-counterpart", count: 2 }]);
+  assert.deepEqual(summary.reasons, [{
+    reason: "test-spec-counterpart",
+    selections: 2,
+    observed: 1,
+    correct: 0,
+    wrong: 1,
+    unresolved: 1,
+    precision: 0,
+  }]);
   assert.equal(summarizeTwoFileMining(mineTwoFileSelections(sessions), 1).insufficient, false);
+});
+
+test("every reason reports its own observed denominator, unresolved count, and precision", () => {
+  const files = ["helpers.test.ts", "utils.ts"];
+  const sessions: SessionInput[] = [
+    // unique-distance, observed correct
+    session([
+      call("src/helperz.ts", { error: true, missing: true, result: snapshot("/repo/src", files) }),
+      call("src/helpers.test.ts"),
+    ], "unique-observed"),
+    // unique-distance, never observed
+    session([
+      call("src/helperz.ts", { error: true, missing: true, result: snapshot("/repo/src", files) }),
+      call("src/unrelated.ts"),
+    ], "unique-unresolved"),
+    // test/spec counterpart, observed wrong
+    session([
+      call("src/helpers.ts", { error: true, missing: true, result: snapshot("/repo/src", files) }),
+      call("src/utils.ts"),
+    ], "pair-wrong"),
+  ];
+
+  const summary = summarizeTwoFileMining(mineTwoFileSelections(sessions));
+
+  assert.deepEqual(summary.reasons, [
+    {
+      reason: "unique-distance", selections: 2, observed: 1, correct: 1, wrong: 0, unresolved: 1, precision: 1,
+    },
+    {
+      reason: "test-spec-counterpart", selections: 1, observed: 1, correct: 0, wrong: 1, unresolved: 0, precision: 0,
+    },
+  ]);
+  assert.equal(summary.observedLabels, 2, "the overall denominator matches the sum of observed rows");
+  assert.equal(summary.unresolved, 1);
+  assert.equal(summary.precision, 0.5);
+});
+
+test("a reason with no observation reports undefined precision, not zero", () => {
+  const summary = summarizeTwoFileMining(mineTwoFileSelections([
+    session([
+      call("src/helpers.ts", { error: true, missing: true, result: snapshot("/repo/src", ["helpers.test.ts", "utils.ts"]) }),
+      call("src/unrelated.ts"),
+    ]),
+  ]));
+
+  assert.equal(summary.reasons[0]!.observed, 0);
+  assert.equal(summary.reasons[0]!.unresolved, 1);
+  assert.equal(summary.reasons[0]!.precision, undefined);
 });
 
 test("the attrition ladder counts empty sessions honestly", () => {
