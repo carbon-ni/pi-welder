@@ -14,8 +14,9 @@ import { createBashRouteState, wrapToolForBashRouting, type BashDelegate, type T
 import type { BashJudgmentClient } from "./contract.ts";
 
 async function loadPiAi(): Promise<any> {
-  const parent = import.meta.resolve("@earendil-works/pi-coding-agent");
-  return import(import.meta.resolve("@earendil-works/pi-ai", parent));
+  // `@earendil-works/pi-ai` is an exact devDependency: the test runtime needs it
+  // explicitly, because a clean install keeps it nested under the host package.
+  return import("@earendil-works/pi-ai");
 }
 
 const piBash: BashDelegate = async ({ command, timeout, cwd, signal, toolCallId }) => {

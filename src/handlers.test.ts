@@ -720,8 +720,7 @@ import { createBashRouteState, sentinelTokenOf, wrapToolForBashRouting, type Bas
 
 /** Pi's own validator, resolved through the SDK's public export map. */
 async function piValidateToolArguments(tool: unknown, toolCall: { name: string; id: string; arguments: unknown }): Promise<unknown> {
-  const parent = import.meta.resolve("@earendil-works/pi-coding-agent");
-  const ai = await import(import.meta.resolve("@earendil-works/pi-ai", parent)) as { validateToolArguments: (tool: unknown, call: unknown) => unknown };
+  const ai = await import("@earendil-works/pi-ai") as { validateToolArguments: (tool: unknown, call: unknown) => unknown };
   return ai.validateToolArguments(tool, toolCall);
 }
 

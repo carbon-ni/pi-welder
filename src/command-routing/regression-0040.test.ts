@@ -18,8 +18,9 @@ import { createRuntime } from "../runtime.ts";
 import { createBashRouteState, wrapToolForBashRouting, type ToolLike } from "./wrapper.ts";
 
 async function loadPiAi(): Promise<any> {
-  const parent = import.meta.resolve("@earendil-works/pi-coding-agent");
-  return import(import.meta.resolve("@earendil-works/pi-ai", parent));
+  // `@earendil-works/pi-ai` is an exact devDependency: the test runtime needs it
+  // explicitly, because a clean install keeps it nested under the host package.
+  return import("@earendil-works/pi-ai");
 }
 
 interface Observed {
