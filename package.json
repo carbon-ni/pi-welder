@@ -1,13 +1,109 @@
 {
-  "name": "pi-welder",
+  "name": "@carbon-ni/pi-welder",
   "version": "0.0.1",
-  "private": true,
+  "description": "Pi extension that repairs bounded tool-call mistakes and reports harness-level tool failures",
+  "license": "MIT",
   "type": "module",
-  "description": "Pi extension that registers harness-level tool failures",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "pi-welder",
+    "tool-call-repair",
+    "tool-failure"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carbon-ni/pi-welder"
+  },
+  "homepage": "https://github.com/carbon-ni/pi-welder#readme",
+  "bugs": {
+    "url": "https://github.com/carbon-ni/pi-welder/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "src/bash-judgment/client.ts",
+    "src/bash-judgment/contract.ts",
+    "src/bash-judgment/eligibility.ts",
+    "src/command-routing/gate.ts",
+    "src/command-routing/wrapper.ts",
+    "src/commands.ts",
+    "src/config.ts",
+    "src/episodes.ts",
+    "src/fields.ts",
+    "src/handlers.ts",
+    "src/index.ts",
+    "src/infra/filesystem.ts",
+    "src/infra/pi/context.ts",
+    "src/infra/pi/contracts.ts",
+    "src/infra/pi/settings-ui.ts",
+    "src/infra/typesafe.ts",
+    "src/model-recovery/ambiguous-shadow.ts",
+    "src/model-recovery/edit-mismatch.ts",
+    "src/model-recovery/jev-shadow.ts",
+    "src/model-recovery/shadow-correlation.ts",
+    "src/model-recovery/shadow-stats.ts",
+    "src/model-recovery/whitespace-normalized.ts",
+    "src/read-recovery/candidates.ts",
+    "src/read-recovery/evidence-gate.ts",
+    "src/read-recovery/path-repair.ts",
+    "src/read-recovery/state.ts",
+    "src/read-shape.ts",
+    "src/recorder/aggregate.ts",
+    "src/recorder/events.ts",
+    "src/recorder/index.ts",
+    "src/recorder/log.ts",
+    "src/recorder/pi-session-source.ts",
+    "src/recorder/report.ts",
+    "src/recorder/stats.ts",
+    "src/recovery.ts",
+    "src/repair-names.ts",
+    "src/repair-warnings.ts",
+    "src/repairs/engine.ts",
+    "src/repairs/helpers.ts",
+    "src/repairs/index.ts",
+    "src/repairs/object-rules.ts",
+    "src/repairs/rules.ts",
+    "src/repairs/types.ts",
+    "src/result-repairs/directory-read.ts",
+    "src/result-repairs/edit-noop.ts",
+    "src/result-repairs/engine.ts",
+    "src/result-repairs/index.ts",
+    "src/result-repairs/missing-read-context.ts",
+    "src/result-repairs/read-offset-context.ts",
+    "src/result-repairs/types.ts",
+    "src/runtime.ts",
+    "src/schemas.ts",
+    "src/welder-settings.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@earendil-works/pi-tui": "0.83.0",
+    "@types/node": "^22.0.0",
+    "typebox": "1.3.7",
+    "typescript": "5.9.3"
+  },
   "scripts": {
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "lint": "tsc --noEmit",
-    "check": "npm run lint && npm test",
+    "check": "npm run lint && npm test && npm run test:scripts",
+    "verify:package": "node scripts/verify-package.mjs",
+    "verify": "npm run check && npm run verify:package",
     "eval:direction": "node --experimental-strip-types scripts/direction-evals.ts report",
     "eval:tune": "node --experimental-strip-types scripts/jev-tune.ts probe",
     "shadow:stats": "node --experimental-strip-types scripts/shadow-stats.ts stats",
@@ -18,19 +114,5 @@
     "eval:mismatch": "node --experimental-strip-types scripts/mismatch-eval.ts run",
     "eval:occurrence": "node --experimental-strip-types scripts/occurrence-eval.ts run",
     "eval:tool-routing": "node --experimental-strip-types scripts/tool-routing-eval.ts run"
-  },
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ]
-  },
-  "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.83.0",
-    "@earendil-works/pi-tui": "0.83.0",
-    "@types/node": "^22.0.0",
-    "typescript": "5.9.3"
-  },
-  "dependencies": {
-    "typebox": "^1.3.7"
   }
 }

@@ -6,6 +6,19 @@
 
 You can't retrain the model. But you can weld the seam.
 
+## Install
+
+```bash
+pi install npm:@carbon-ni/pi-welder      # latest
+pi install npm:@carbon-ni/pi-welder@0.0.1 # pinned
+pi -e npm:@carbon-ni/pi-welder           # try it for one run only
+```
+
+Pi provides `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and
+`typebox` itself, so they are declared as `peerDependencies` with a `"*"` range
+and are never bundled. The package ships only runtime source plus
+`README.md` and `LICENSE`; tests, plans, scripts, and local state are excluded.
+
 ## What it does
 
 Every agent makes the same recurring mistakes — a path wrapped in a markdown link, `"true"` where a boolean belongs, a flat `oldText`/`newText` where `edits: [{...}]` is expected, a comma-separated string where an array is required. The tool throws, the turn burns tokens, the model apologizes.
@@ -87,30 +100,48 @@ This is **off by default** and requires two things: the persisted setting below 
 
 ### Jev read-path repair (opt-in, sends relative paths off-machine)
 
-When a `read` targets a path that does not exist, welder can generate up to 5
-nearby existing files, ask TypeSafe's Jev to rank one, and — only if the
-predeclared evidence gate passes — transparently replace `read.path`. This is
-**off by default**, requires the persisted setting below **and** a
-`TYPESAFE_API_KEY`, and is **independent of source shadowing** (`sourceShadowingEnabled`
-does not enable it).
+When a `read` targets a path that does not exist, welder generates up to 5
+nearby existing files, asks TypeSafe's Jev to rank one, and — after a
+post-validation of the selected candidate — transparently replaces `read.path`.
+It is **off by default** and needs both the persisted setting below **and** a
+`TYPESAFE_API_KEY`; those two are what enable it. There is no hidden runtime
+gate: a plan exists only when the setting is on and a client exists.
+
+Bounded by construction: candidates are capped at 5, selection must reach
+confidence **≥ 0.9**, the Jev call has a **2 s** deadline with **zero retries**,
+and the chosen path is re-validated immediately before mutation (containment,
+regular file). A candidate whose size is known to exceed **1 MiB** fails closed
+without being read, so the post-check never pulls a huge file into memory.
 
 When enabled, **relative repository paths leave this machine**: the requested
 relative path plus up to 5 candidate relative paths. No file contents, source
-windows, credentials, absolute paths, or conversation payload are sent; logs
-persist only counts and statuses, never paths.
+windows, credentials, absolute paths, or conversation payloads are sent, and the
+JSONL log keeps only counts, statuses, and field names — never paths.
 
-> **Safety:** a wrong read can silently mislead later reasoning. Automatic
-> repair therefore stays disabled until the predeclared gate passes — at least
-> 30 **human-reviewed** labels, precision ≥ 0.99 at the 0.9 confidence
-> threshold, and zero wrong-target selections. The current offline evidence
-> (TASK-0022) failed that gate, so the feature runs **shadow-only**: eligible
-> missing reads are counted, nothing is sent, and no path is mutated.
+The predeclared offline evaluation from TASK-0022 (30 human-reviewed labels,
+precision ≥ 0.99, zero wrong targets) **failed** and is kept as
+[historical evidence](src/read-recovery/evidence-gate.ts). It is documentation,
+not a switch: it no longer gates runtime behavior.
 
 ```json
 {
   "readPathRepairEnabled": true
 }
 ```
+
+### Stats categories
+
+`/welder-stats` separates what the extension actually did:
+
+- **repairs (input transformed or routed)** — argument repairs, `route-to-bash`,
+  `restore-read-path`; these count in `calls repaired`.
+- **result recoveries (verified patch, input unchanged)** — `edit-noop`,
+  `directory-read`, `read-offset-context`.
+- **diagnostic enrichments (context only, never a repair)** —
+  `missing-read-context`.
+
+Only the first category is a repair; the other two are reported separately and
+never inflate the repaired-call count.
 
 ## Architecture
 
@@ -145,9 +176,12 @@ See [`AGENTS.md`](AGENTS.md), [`src/repairs/AGENTS.md`](src/repairs/AGENTS.md), 
 TypeScript ESM. No build step — Pi loads `src/index.ts` directly. Native Node test runner.
 
 ```bash
-npm test          # run tests
-npm run lint      # tsc --noEmit
-npm run check     # lint + tests
+npm test               # extension tests
+npm run test:scripts   # release/package script tests
+npm run lint           # tsc --noEmit
+npm run check          # lint + both test suites
+npm run verify:package # pack once, isolated consumer, real Pi host load
+make verify            # everything above
 ```
 
 When changing behavior, write or update tests first. Each module has a co-located `*.test.ts`; `repairs/` and `recorder/` keep characterization suites at `src/repairs.test.ts` and `src/recorder.test.ts`.
@@ -158,4 +192,5 @@ A welder doesn't redesign the part. A welder sees a fracture and fuses it — qu
 
 ## License
 
-Private.
+MIT. See [LICENSE](LICENSE). Operators should read [RELEASING.md](RELEASING.md)
+before creating a release.

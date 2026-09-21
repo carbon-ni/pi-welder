@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --global npm@11.5.1
+      - run: make all
+      - name: Pack and verify the canonical artifact once
+        run: |
+          mkdir -p .release
+          npm pack --pack-destination .release
+          tarball="$(find .release -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          sha256sum "$tarball" > .release/SHA256SUMS
+          PACKAGE_TARBALL="$tarball" npm run verify:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifact
+          path: |
+            .release/*.tgz
+            .release/SHA256SUMS
+          include-hidden-files: true
+          if-no-files-found: error
+
+  publish:
+    if: needs.quality-gate.result == 'success'
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - run: npm install --global npm@11.5.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifact
+          path: .release
+      - name: Verify release identity
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
+          test "${{ github.event.release.name }}" != ""
+      - name: Select the verified artifact
+        run: |
+          tarball="$(find .release -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+      - name: Publish or resume the exact artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          QUALITY_GATE_RESULT: ${{ needs.quality-gate.result }}
+        run: |
+          node scripts/release-publish.mjs "$TARBALL"
+          echo "Published or resumed $TARBALL ($(cut -d' ' -f1 .release/SHA256SUMS))." >> "$GITHUB_STEP_SUMMARY"
