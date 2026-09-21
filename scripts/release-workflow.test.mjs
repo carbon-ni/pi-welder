@@ -60,6 +60,7 @@ test("the parser really finds the workflow shell bodies", async () => {
   assert.ok(runBodies(ci).length >= 3, "expected several CI run bodies");
   assert.ok(releaseRuns.some(({ body }) => body.includes("release-publish.mjs")), "the publish body is parsed");
   assert.ok(releaseRuns.some(({ body }) => body.includes("npm pack")), "the pack body is parsed");
+  assert.ok(releaseRuns.some(({ body }) => body.includes("release-checksum.mjs")), "the checksum body is parsed");
   assert.ok(workflowExpressions(release).length >= 4, "expressions are detected at all");
 });
 
@@ -89,6 +90,14 @@ test("release event values reach scripts only through the environment", async ()
   assert.match(source, /RELEASE_NAME: \$\{\{ github\.event\.release\.name \}\}/, "the release name is passed by env");
   assert.match(source, /test -n "\$RELEASE_NAME"/, "and tested as a shell variable");
   assert.equal(source.includes('test "${{ github.event.release.name }}"'), false, "no inline release name in a script");
+});
+
+test("the gate writes the checksum through the tested script, not a raw sha256sum", async () => {
+  const source = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
+  const packBody = runBodies(source).find(({ body }) => body.includes("npm pack"));
+  assert.ok(packBody, "the pack step exists");
+  assert.match(packBody.body, /node scripts\/release-checksum\.mjs "\$tarball"/, "the artifact checksum comes from the script");
+  assert.equal(/sha256sum\s/.test(packBody.body), false, "no raw sha256sum redirect that would embed a path");
 });
 
 test("every job declares its permissions explicitly", async () => {

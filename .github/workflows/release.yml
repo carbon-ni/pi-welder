@@ -30,7 +30,9 @@ jobs:
           npm pack --pack-destination .release
           tarball="$(find .release -name '*.tgz' -print -quit)"
           test -n "$tarball"
-          sha256sum "$tarball" > .release/SHA256SUMS
+          # The manifest records the bare filename, so it matches the layout
+          # `actions/download-artifact` produces for the publish job.
+          node scripts/release-checksum.mjs "$tarball"
           PACKAGE_TARBALL="$tarball" npm run verify:package
       - uses: actions/upload-artifact@v4
         with:

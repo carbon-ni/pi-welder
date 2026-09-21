@@ -45,7 +45,11 @@ only the publish job holds `contents: write` and `id-token: write`.
 
 - `npm ci`, then `make all` — lint, extension tests, script tests;
 - `npm pack --pack-destination .release` — exactly one tarball, no rebuilds;
-- `sha256sum` into `.release/SHA256SUMS`;
+- `node scripts/release-checksum.mjs "$tarball"`, which writes
+  `.release/SHA256SUMS` next to the artifact with the **bare filename**. A raw
+  `sha256sum "$tarball"` would record the path it was given, and the publish job —
+  where `actions/download-artifact` flattens the artifact into one directory —
+  would then reject the manifest for not naming the tarball;
 - `PACKAGE_TARBALL=<tarball> npm run verify:package` — verifies **that** tarball:
   identity, contents against the runtime import closure, a real isolated
   consumer (`npm ci` of the committed pinned fixture, then
@@ -67,7 +71,7 @@ only the publish job holds `contents: write` and `id-token: write`.
 - re-checks tag identity and that the Release name is not empty;
 - runs `scripts/release-publish.mjs`, which:
   - first validates the local evidence: `SHA256SUMS` must be well formed, name the
-    tarball exactly once, and its digest must match the artifact bytes. A
+    tarball's basename exactly once, and its digest must match the artifact bytes. A
     mismatch or a malformed file stops the run **before any npm or GitHub call**;
   - publishes to npm with provenance when the version is absent;
   - skips npm when the existing version is **byte-identical** and fails when it
