@@ -91,6 +91,18 @@ test("release event values reach scripts only through the environment", async ()
   assert.equal(source.includes('test "${{ github.event.release.name }}"'), false, "no inline release name in a script");
 });
 
+test("every job declares its permissions explicitly", async () => {
+  const ci = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  const release = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
+
+  assert.match(ci, /quality-gate:\n(?:.*\n)*?\s+permissions:\n\s+contents: read/, "CI is read-only");
+  assert.match(release, /quality-gate:\n(?:.*\n)*?\s+permissions:\n\s+contents: read/, "the release gate is read-only");
+
+  const publish = release.slice(release.indexOf("  publish:"));
+  assert.match(publish, /permissions:\n\s+contents: write\n\s+id-token: write/, "publish keeps contents + id-token write");
+  assert.equal(/\n\s+id-token: write/.test(release.slice(0, release.indexOf("  publish:"))), false, "the gate never gets id-token");
+});
+
 test("publication is reachable only from a published release", async () => {
   const source = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
   assert.match(source, /on:\n\s+release:\n\s+types:\s*\[published\]/, "the trigger is release.published");

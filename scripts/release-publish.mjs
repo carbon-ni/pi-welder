@@ -36,6 +36,29 @@ export function qualityGateAllowsPublish(result) {
   return result === "success";
 }
 
+/**
+ * Validates the local manifest before any remote call: the file must be a
+ * well-formed SHA-256 list, must name the tarball, and the declared digest must
+ * match the bytes about to be published.
+ */
+export function verifyChecksumFile({ checksumText, tarballName, actualSha256 }) {
+  if (typeof checksumText !== "string") return { ok: false, reason: "SHA256SUMS is missing or unreadable" };
+  const entries = checksumText.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  if (entries.length === 0) return { ok: false, reason: "SHA256SUMS is empty" };
+  const matches = [];
+  for (const entry of entries) {
+    const match = entry.match(/^([0-9a-f]{64})\s+\*?(.+)$/);
+    if (!match) return { ok: false, reason: `malformed SHA256SUMS entry: ${entry}` };
+    matches.push({ digest: match[1], filename: match[2].trim() });
+  }
+  const forTarball = matches.filter((entry) => entry.filename === tarballName);
+  if (forTarball.length !== 1)
+    return { ok: false, reason: `SHA256SUMS must name ${tarballName} exactly once (found ${forTarball.length})` };
+  if (forTarball[0].digest !== actualSha256)
+    return { ok: false, reason: `SHA256SUMS declares ${forTarball[0].digest} for ${tarballName}, the artifact is ${actualSha256}` };
+  return { ok: true };
+}
+
 const MISSING_NPM_CODES = new Set(["E404", "ETARGET"]);
 
 /** A missing registry artifact resumes; any other failure is fatal. */
@@ -99,6 +122,12 @@ export async function publishRelease({ tarball, packageName, version, releaseTag
     throw new Error(`Release tag ${releaseTag} does not match package version ${version}`);
 
   const localSha256 = await sha256(tarball);
+  // Local evidence is checked before the first remote command runs.
+  const checksumPath = path.join(path.dirname(tarball), "SHA256SUMS");
+  const checksumText = await readFile(checksumPath, "utf8").catch(() => undefined);
+  const verification = verifyChecksumFile({ checksumText, tarballName: path.basename(tarball), actualSha256: localSha256 });
+  if (!verification.ok) throw new Error(`Local artifact verification failed: ${verification.reason}`);
+
   const work = await mkdtemp(path.join(tmpdir(), "pi-welder-release-"));
   const npmWork = await mkdtemp(path.join(work, "npm-"));
   const githubWork = await mkdtemp(path.join(work, "github-"));
@@ -114,13 +143,12 @@ export async function publishRelease({ tarball, packageName, version, releaseTag
     if (releaseDecision === "mismatch") throw new Error(`GitHub Release ${releaseTag} has a different ${asset}`);
     if (releaseDecision === "publish") await run("gh", ["release", "upload", releaseTag, tarball]);
 
-    const checksum = path.join(path.dirname(tarball), "SHA256SUMS");
     const checksumExisting = await existingReleaseAsset(releaseTag, "SHA256SUMS", githubWork, run);
     if (checksumExisting) {
-      const [expected, actual] = await Promise.all([readFile(checksum, "utf8"), readFile(checksumExisting, "utf8")]);
+      const [expected, actual] = await Promise.all([readFile(checksumPath, "utf8"), readFile(checksumExisting, "utf8")]);
       if (expected !== actual) throw new Error(`GitHub Release ${releaseTag} has a different SHA256SUMS`);
     } else {
-      await run("gh", ["release", "upload", releaseTag, checksum]);
+      await run("gh", ["release", "upload", releaseTag, checksumPath]);
     }
     return { npm: npmDecision, github: releaseDecision, sha256: localSha256 };
   } finally {

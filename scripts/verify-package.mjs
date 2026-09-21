@@ -4,7 +4,8 @@
  * Packs exactly one artifact, proves its identity and contents against the
  * runtime import closure, installs it into a real isolated consumer
  * (`npm ci` for the pinned peers, then `npm install` of the canonical tarball),
- * and proves the installed extension loads inside the real Pi host offline.
+ * and proves the installed extension loads inside the consumer's own pinned Pi
+ * host offline, under a throwaway HOME, never the ambient Pi or HOME.
  *
  * The consumer install needs network or an npm cache: the pinned peers are
  * fetched by npm exactly as a user installs them. Nothing links back to this
@@ -189,17 +190,31 @@ try {
       `}\n`,
   );
 
-  const piBin = process.env.PI_BIN ?? "pi";
-  const host = await execFile(piBin, ["--no-extensions", "--extension", control, "--extension", entry, "--help"], {
-    cwd: consumerDir,
-    env: { ...environment, PI_OFFLINE: "1", GIT_TERMINAL_PROMPT: "0" },
-  });
-  const hostOutput = `${host.stdout}${host.stderr}`;
-  if (hostOutput.includes("PI_WELDER_PACKED_FAILED"))
-    throw new Error(`The packed extension failed to load inside the Pi host: ${hostOutput}`);
-  if (!hostOutput.includes("PI_WELDER_PACKED_LOADED:function"))
-    throw new Error(`The packed extension did not load inside the Pi host: ${hostOutput}`);
-
+  // The host is the Pi installed for the pinned consumer, under a throwaway
+  // HOME, so neither the ambient `pi` nor the developer's config is involved.
+  const piBin = process.env.PI_BIN ?? path.join(consumerDir, "node_modules", ".bin", "pi");
+  if (process.env.PI_BIN === undefined && !existsSync(piBin))
+    throw new Error(`The pinned consumer did not install a pi executable at ${piBin}`);
+  const hostHome = await mkdtemp(path.join(tmpdir(), "pi-welder-host-home-"));
+  try {
+    const host = await execFile(piBin, ["--no-extensions", "--extension", control, "--extension", entry, "--help"], {
+      cwd: consumerDir,
+      env: {
+        ...environment,
+        HOME: hostHome,
+        PI_OFFLINE: "1",
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=5",
+      },
+    });
+    const hostOutput = `${host.stdout}${host.stderr}`;
+    if (hostOutput.includes("PI_WELDER_PACKED_FAILED"))
+      throw new Error(`The packed extension failed to load inside the Pi host: ${hostOutput}`);
+    if (!hostOutput.includes("PI_WELDER_PACKED_LOADED:function"))
+      throw new Error(`The packed extension did not load inside the Pi host: ${hostOutput}`);
+  } finally {
+    await rm(hostHome, { recursive: true, force: true });
+  }
   console.log(`Package verification passed: ${manifest.name}@${manifest.version} (${packed.length} files, sha256 ${await sha256(archive)})`);
 } finally {
   await rm(archiveDir, { recursive: true, force: true });

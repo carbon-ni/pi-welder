@@ -38,6 +38,9 @@ action. The automation itself never creates remote state.
 
 ## What runs
 
+Both the CI job and the release quality gate declare `permissions: contents: read`;
+only the publish job holds `contents: write` and `id-token: write`.
+
 **Quality gate** (job `quality-gate`, checked out at the release tag):
 
 - `npm ci`, then `make all` — lint, extension tests, script tests;
@@ -50,8 +53,10 @@ action. The automation itself never creates remote state.
   untouched), no links back to the checkout, peer versions asserted under the
   consumer, and proof that the installed extension loads inside the real Pi host
   offline (a control extension inside that host imports the packed entrypoint and
-  reports success). The consumer install needs network or an npm cache; the host
-  load itself runs with `PI_OFFLINE=1`;
+  reports success). The host is the **consumer's own pinned** `node_modules/.bin/pi`
+  run under a throwaway `HOME`, so neither an ambient `pi` nor a developer config
+  is involved. The consumer install needs network or an npm cache; the host load
+  itself runs with `PI_OFFLINE=1`;
 - uploads the tarball and `SHA256SUMS` as the `release-artifact` workflow
   artifact.
 
@@ -61,6 +66,9 @@ action. The automation itself never creates remote state.
   the verified bytes;
 - re-checks tag identity and that the Release name is not empty;
 - runs `scripts/release-publish.mjs`, which:
+  - first validates the local evidence: `SHA256SUMS` must be well formed, name the
+    tarball exactly once, and its digest must match the artifact bytes. A
+    mismatch or a malformed file stops the run **before any npm or GitHub call**;
   - publishes to npm with provenance when the version is absent;
   - skips npm when the existing version is **byte-identical** and fails when it
     differs;

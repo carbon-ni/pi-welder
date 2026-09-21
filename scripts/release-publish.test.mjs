@@ -15,6 +15,7 @@ import path from "node:path";
 
 import {
   isMissingNpmArtifactError,
+  verifyChecksumFile,
   publicationDecision,
   publishRelease,
   qualityGateAllowsPublish,
@@ -192,4 +193,61 @@ test("only a genuinely missing artifact resumes; other npm errors do not", () =>
   assert.equal(publicationDecision("a", "b"), "mismatch");
   assert.equal(releaseTagMatchesVersion("v1.0.0", "1.0.0"), true);
   assert.equal(releaseTagMatchesVersion("1.0.0", "1.0.0"), false);
+});
+
+test("the local checksum manifest is validated before any remote call", async () => {
+  const valid = { checksumText: `${"a".repeat(64)}  carbon-ni-pi-welder-0.0.1.tgz\n`, tarballName: "carbon-ni-pi-welder-0.0.1.tgz", actualSha256: "a".repeat(64) };
+  assert.equal(verifyChecksumFile(valid).ok, true);
+  assert.equal(verifyChecksumFile({ ...valid, checksumText: `${"a".repeat(64)}  *carbon-ni-pi-welder-0.0.1.tgz\n` }).ok, true, "binary marker is accepted");
+
+  const malformed = [
+    [undefined, /missing or unreadable/],
+    ["", /empty/],
+    ["not a checksum line", /malformed/],
+    [`${"a".repeat(63)}  carbon-ni-pi-welder-0.0.1.tgz`, /malformed/],
+    [`${"a".repeat(64)}`, /malformed/],
+    [`${"a".repeat(64)}  other.tgz`, /exactly once/],
+    [`${"a".repeat(64)}  carbon-ni-pi-welder-0.0.1.tgz\n${"a".repeat(64)}  carbon-ni-pi-welder-0.0.1.tgz`, /exactly once/],
+  ];
+  for (const [checksumText, pattern] of malformed) {
+    const result = verifyChecksumFile({ checksumText, ...valid, checksumText });
+    assert.equal(result.ok, false, String(checksumText));
+    assert.match(result.reason, pattern);
+  }
+
+  const mismatch = verifyChecksumFile({ ...valid, actualSha256: "b".repeat(64) });
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.reason, /declares a+ for carbon-ni-pi-welder-0\.0\.1\.tgz, the artifact is b+/);
+});
+
+test("a mismatched or malformed local manifest stops the run before npm or gh", async () => {
+  const { result, calls } = await withTarball("canonical bytes", async ({ tarball, directory }) => {
+    await writeFile(path.join(directory, "SHA256SUMS"), `${"b".repeat(64)}  ${path.basename(tarball)}\n`);
+    const { calls, run } = recorder({});
+    const result = await publishRelease({ tarball, packageName: PACKAGE, version: VERSION, releaseTag: `v${VERSION}`, npmTag: "latest", run })
+      .catch((error) => error);
+    return { result, calls };
+  });
+  assert.match(String(result), /Local artifact verification failed/);
+  assert.equal(calls.length, 0, "no remote command ran on a checksum mismatch");
+
+  const malformed = await withTarball("canonical bytes", async ({ tarball, directory }) => {
+    await writeFile(path.join(directory, "SHA256SUMS"), "garbage\n");
+    const { calls, run } = recorder({});
+    const result = await publishRelease({ tarball, packageName: PACKAGE, version: VERSION, releaseTag: `v${VERSION}`, npmTag: "latest", run })
+      .catch((error) => error);
+    return { result, calls };
+  });
+  assert.match(String(malformed.result), /malformed SHA256SUMS entry/);
+  assert.equal(malformed.calls.length, 0);
+
+  const missing = await withTarball("canonical bytes", async ({ tarball, directory }) => {
+    await rm(path.join(directory, "SHA256SUMS"), { force: true });
+    const { calls, run } = recorder({});
+    const result = await publishRelease({ tarball, packageName: PACKAGE, version: VERSION, releaseTag: `v${VERSION}`, npmTag: "latest", run })
+      .catch((error) => error);
+    return { result, calls };
+  });
+  assert.match(String(missing.result), /missing or unreadable/);
+  assert.equal(missing.calls.length, 0);
 });

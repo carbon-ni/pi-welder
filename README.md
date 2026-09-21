@@ -182,7 +182,7 @@ npm test               # extension tests
 npm run test:scripts   # release/package script tests
 npm run lint           # tsc --noEmit
 npm run check          # lint + both test suites
-npm run verify:package # pack once, real npm consumer install, real Pi host load
+npm run verify:package # pack once, real npm consumer install, pinned Pi host load
 make verify            # everything above
 ```
 
