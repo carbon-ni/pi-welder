@@ -1,7 +1,7 @@
 ---
 id: TASK-0041
 title: Add deterministic npm and GitHub release process
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: [release, npm, github, package, oidc, verification]
