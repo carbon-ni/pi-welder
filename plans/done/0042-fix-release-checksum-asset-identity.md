@@ -1,7 +1,7 @@
 ---
 id: TASK-0042
 title: Fix release checksum asset identity
-status: doing
+status: done
 depends_on: []
 priority: high
 tags: []
