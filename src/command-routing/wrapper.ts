@@ -11,6 +11,7 @@
  * and the command is never logged, rendered, or copied into any result.
  */
 
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { Value } from "typebox/value";
 
 import { recognizeBashShapedCall } from "./gate.ts";
@@ -194,7 +195,7 @@ interface WrapOptions {
 
 function noticeComponent(lines: readonly string[]) {
   return {
-    render: (_width: number) => [...lines],
+    render: (width: number) => lines.map((line) => truncateToWidth(line, width)),
     invalidate: () => { /* static notice */ },
   };
 }

@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 import {
   BASH_TIMEOUT_MAX_SECONDS,
   MAX_COMMAND_BYTES,
@@ -263,6 +265,22 @@ test("sentinels render as a safe notice and normal calls keep the built-in rende
 
   const normalResult = wrapper.renderResult!({ content: [], details: {} }, {}, {}, { cwd: "/work", args: { path: "a.ts" }, isError: false })!;
   assert.deepEqual(normalResult.render(80), ["builtin result"]);
+});
+
+test("routed notices fit the requested render width", () => {
+  const wrapper = wrapToolForBashRouting({
+    builtin: builtinStub("read"), toolName: "read", state: state(),
+    delegate: async () => ({ content: [] }), resolveBuiltin: () => builtinStub("read"), nextToken: () => "tok",
+  });
+  const longLine = "src/domain/guest-message.test.ts:107: " + "x".repeat(120);
+  const result = wrapper.renderResult!(
+    { content: [{ type: "text", text: longLine }] },
+    {},
+    {},
+    { cwd: "/work", args: sentinelArguments("read", "tok"), isError: false },
+  )!;
+
+  assert.equal(result.render(40).every((line) => visibleWidth(line) <= 40), true);
 });
 
 test("the refusal message is bounded, names the reason, and never contains a command", () => {
